@@ -1,0 +1,6 @@
+{
+  "name": "noxdeck",
+  "owner": { "name": "LVStiller" },
+  "metadata": { "description": "noxdeck, a retro terminal dashboard for Claude Code with Nox the owl." },
+  "plugins": [{ "name": "noxdeck", "source": "./", "description": "Retro terminal dashboard pane beside the transcript, with Nox the owl (observes only)." }]
+}

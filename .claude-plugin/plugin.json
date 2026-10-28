@@ -1,0 +1,90 @@
+{
+  "name": "noxdeck",
+  "version": "1.0.0",
+  "description": "A retro terminal dashboard beside the transcript: status with Nox (a pixel picture where the terminal draws pictures, in one of five costumes, in block characters elsewhere), the context window, a radar for loops, failures, hotspots and waits (or Claude's plan), changed files and subagents with their tokens, model and current activity, a press on one showing its transcript. Observes only.",
+  "author": {
+    "name": "Luis Vincent Stiller",
+    "url": "https://luisstiller.com"
+  },
+  "homepage": "https://github.com/LVStiller/noxdeck",
+  "repository": "https://github.com/LVStiller/noxdeck",
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "theme": {
+      "type": "string",
+      "title": "Theme",
+      "description": "The noxdeck pane's color theme; every theme draws in your Claude Code theme's colors.",
+      "options": [
+        "classic"
+      ],
+      "default": "classic"
+    },
+    "language": {
+      "type": "string",
+      "title": "Language",
+      "description": "Language of the pane's sentences and states: en (English, the default) or de (German). Tab names, card titles and established terms stay English.",
+      "options": [
+        "en",
+        "de"
+      ],
+      "default": "en"
+    },
+    "limitStyle": {
+      "type": "string",
+      "title": "5h limit",
+      "description": "How the STATUS card draws the 5h limit: five hearts (hearts) or a ten-cell bar (bar).",
+      "options": [
+        "hearts",
+        "bar"
+      ],
+      "default": "hearts"
+    },
+    "noxStyle": {
+      "type": "string",
+      "title": "Nox style",
+      "description": "How Nox is drawn: fein, a pixel picture where the terminal draws pictures (the default; Ghostty, kitty; the block characters elsewhere), or klassisch, the block characters always.",
+      "options": [
+        "fein",
+        "klassisch"
+      ],
+      "default": "fein"
+    },
+    "noxPalette": {
+      "type": "string",
+      "title": "Nox palette",
+      "description": "The fine Nox's colors: standard (lavender), nacht (blue and silver) or retro (shades of green).",
+      "options": [
+        "standard",
+        "nacht",
+        "retro"
+      ],
+      "default": "standard"
+    },
+    "noxCostume": {
+      "type": "string",
+      "title": "Nox costume",
+      "description": "The fine Nox's costume: ohne (Nox as it is, the default), zauberer, astronaut, detektiv or hacker; zufall draws one of the four at each session's start and keeps it until the session ends, a reload included. The block Nox wears none.",
+      "options": [
+        "ohne",
+        "zauberer",
+        "astronaut",
+        "detektiv",
+        "hacker",
+        "zufall"
+      ],
+      "default": "ohne"
+    },
+    "animations": {
+      "type": "string",
+      "title": "Animations",
+      "description": "How much Nox moves: voll (every animation), ruhig (blinking and the change of state only) or aus (a still picture). Claude Code's Reduce motion setting holds voll to ruhig.",
+      "options": [
+        "voll",
+        "ruhig",
+        "aus"
+      ],
+      "default": "voll"
+    }
+  }
+}

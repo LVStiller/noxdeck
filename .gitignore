@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# Written by Claude Code each time it loads a mod: the API types and a tsconfig.
+**/.claude-plugin/types/
+
+# Dependencies, build and test output
+node_modules/
+*.tsbuildinfo
+coverage/
+*.log
+
+# Local settings and secrets
+.env
+.env.*
+.claude/settings.local.json
+
+# Scratch work and drafts
+scratch/
+tmp/
+drafts/
+*.draft.png
