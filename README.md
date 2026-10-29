@@ -58,7 +58,7 @@ In `/config`, each under `noxdeck.<name>`, or when installing in a shell with `-
 
 ## What this mod can do
 
-`claude plugin validate .` reads the hooks module the way Claude Code loads it and prints every event it hooks and every call it makes on `$`. For noxdeck 1.0.0:
+`claude plugin validate .` reads the hooks module the way Claude Code loads it and prints every event it hooks and every call it makes on `$`. For noxdeck 1.0.1:
 
 ```
 hooks: session.start, command.run{command=noxdeck}, ui.close{id=noxdeck}, tool.call, agent.spawn, tool.check, classic.PreToolUse, classic.PermissionRequest, classic.PermissionDenied, classic.PostToolUseFailure, classic.PostToolUse, turn.step, turn.start, turn.complete, session.measure, session.compact, session.end, ui.render{component=Pane, requestId=noxdeck}, ui.render{component=SessionMode}
@@ -84,7 +84,7 @@ noxdeck is not affiliated with Anthropic. It is a hobby project, with no warrant
 
 ## Author
 
-Luis Vincent Stiller, [luisstiller.com](https://luisstiller.com)
+Luis Vincent Stiller, [github.com/LVStiller](https://github.com/LVStiller)
 
 ## Support
 

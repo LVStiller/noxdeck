@@ -1,10 +1,10 @@
 {
   "name": "noxdeck",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A retro terminal dashboard beside the transcript: status with Nox (a pixel picture where the terminal draws pictures, in one of five costumes, in block characters elsewhere), the context window, a radar for loops, failures, hotspots and waits (or Claude's plan), changed files and subagents with their tokens, model and current activity, a press on one showing its transcript. Observes only.",
   "author": {
     "name": "Luis Vincent Stiller",
-    "url": "https://luisstiller.com"
+    "url": "https://github.com/LVStiller"
   },
   "homepage": "https://github.com/LVStiller/noxdeck",
   "repository": "https://github.com/LVStiller/noxdeck",
