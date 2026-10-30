@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, SiteView, Timer } from 'claude-code'
+import type { Args, EngineInterface, Frozen, Register, SiteView, Timer } from 'claude-code'
 
 import type { Activity, AgentBoard, AgentRow, Ask, Cues, FinePose, NoxCostume, Tab, TodoTools, UsageTrack } from '../types'
 import {
@@ -628,6 +628,60 @@ function showView($: EngineInterface, view: SiteView, refused: (reason: string) 
   })
 }
 
+// What the permission hooks and agent.spawn observe. Each hook only calls
+// one of these and passes its event on, so its body holds no function and
+// no return but its last.
+
+/** A spawn waits in pendingSpawns until the agent list or its loop's first turn names the agent. */
+function noteSpawn($: EngineInterface, spawned: Frozen<Args<'agent.spawn'>>): Promise<void> {
+  return quietly(async () => {
+    const at = await $.clock.now()
+    const spawn = { promptKey: hashOf(spawned.prompt), description: maskSecrets(spawned.description), type: spawned.subagentType, at }
+    pendingSpawns = [...waitingSpawns(at), spawn].slice(-20)
+    // The mascot waves the new agent off; the tick reads the agent list while a spawn waits.
+    await update($, cues, state => ({ ...state, wavedAt: at }))
+    ensureTicker($)
+  })
+}
+
+/** A call that reached the permission check waits in checkedAsks for a PermissionRequest. */
+function noteCheck(check: Frozen<Args<'tool.check'>>): void {
+  const id = check.tool_use_id
+  if (id !== undefined) {
+    checkedCalls.add(id)
+    const checked = { id, tool: check.tool, agentId: check.agentId ?? null, input: inputKey(check.input) }
+    checkedAsks = [...checkedAsks.filter(ask => ask.id !== id), checked].slice(-20)
+  }
+}
+
+/** A dialog opening: the mascot asks from the start, until its call ends. */
+function noteRequest($: EngineInterface, request: Frozen<Args<'classic.PermissionRequest'>>): Promise<void> {
+  // Its call: the checked ask of this tool and loop with the same input,
+  // else the oldest (an ask the auto-mode check settled opens no dialog).
+  const loop = request.agent_id ?? null
+  const input = inputKey(request.tool_input)
+  const candidates = checkedAsks.filter(ask => ask.tool === request.tool_name && ask.agentId === loop)
+  const checked = candidates.find(ask => ask.input === input) ?? candidates[0]
+  checkedAsks = checkedAsks.filter(ask => ask !== checked)
+  const asked: Ask = { id: checked?.id ?? null, tool: request.tool_name, agentId: loop }
+  if (asked.id !== null) permissionCalls.add(asked.id)
+  if (loop !== null) agentsAsking.add(loop)
+  return quietly(async () => {
+    const at = await $.clock.now()
+    await update($, cues, state => {
+      const opened = withAsking(state, [...state.asking, asked].slice(-20), at)
+      return isApproval(asked) ? { ...opened, approvals: opened.approvals + 1 } : opened
+    })
+    ensureTicker($)
+  })
+}
+
+/** A call the auto-mode check refused leaves the checked asks, counted as decided. */
+function noteDenied(denied: Frozen<Args<'classic.PermissionDenied'>>): void {
+  checkedAsks = checkedAsks.filter(ask => ask.id !== denied.tool_use_id)
+  permissionCalls.add(denied.tool_use_id)
+}
+
 export const register: Register = (on, options) => {
   const theme = themeOf(options.theme)
   const s = stringsOf(options.language)
@@ -878,26 +932,14 @@ export const register: Register = (on, options) => {
   // A spawn waits until the agent list or its loop's first turn names the
   // agent (pendingSpawns); it passes on unchanged, and its answer unread.
   on('agent.spawn', async (spawnHost, spawnEvent, spawnPassOn) => {
-    await quietly(async () => {
-      const at = await spawnHost.clock.now()
-      const spawn = { promptKey: hashOf(spawnEvent.prompt), description: maskSecrets(spawnEvent.description), type: spawnEvent.subagentType, at }
-      pendingSpawns = [...waitingSpawns(at), spawn].slice(-20)
-      // The mascot waves the new agent off; the tick reads the agent list while a spawn waits.
-      await update(spawnHost, cues, state => ({ ...state, wavedAt: at }))
-      ensureTicker(spawnHost)
-    })
+    await noteSpawn(spawnHost, spawnEvent)
     return spawnPassOn(spawnEvent)
   })
 
   // A call that reaches the permission check: a PermissionRequest may take
   // it for its dialog. The verdict passes on unread.
   on('tool.check', (checkHost, checkEvent, checkPassOn) => {
-    const id = checkEvent.tool_use_id
-    if (id !== undefined) {
-      checkedCalls.add(id)
-      const checked = { id, tool: checkEvent.tool, agentId: checkEvent.agentId ?? null, input: inputKey(checkEvent.input) }
-      checkedAsks = [...checkedAsks.filter(ask => ask.id !== id), checked].slice(-20)
-    }
+    noteCheck(checkEvent)
     return checkPassOn(checkEvent)
   })
 
@@ -910,31 +952,13 @@ export const register: Register = (on, options) => {
   // The dialog shows while the PermissionRequest hooks run, so the mascot
   // asks from the start, until the call ends; the answer passes on unread.
   on('classic.PermissionRequest', async (requestHost, requestEvent, requestPassOn) => {
-    // Its call: the checked ask of this tool and loop with the same input,
-    // else the oldest (an ask the auto-mode check settled opens no dialog).
-    const loop = requestEvent.agent_id ?? null
-    const input = inputKey(requestEvent.tool_input)
-    const candidates = checkedAsks.filter(ask => ask.tool === requestEvent.tool_name && ask.agentId === loop)
-    const checked = candidates.find(ask => ask.input === input) ?? candidates[0]
-    checkedAsks = checkedAsks.filter(ask => ask !== checked)
-    const asked: Ask = { id: checked?.id ?? null, tool: requestEvent.tool_name, agentId: loop }
-    if (asked.id !== null) permissionCalls.add(asked.id)
-    if (loop !== null) agentsAsking.add(loop)
-    await quietly(async () => {
-      const at = await requestHost.clock.now()
-      await update(requestHost, cues, state => {
-        const opened = withAsking(state, [...state.asking, asked].slice(-20), at)
-        return isApproval(asked) ? { ...opened, approvals: opened.approvals + 1 } : opened
-      })
-      ensureTicker(requestHost)
-    })
+    await noteRequest(requestHost, requestEvent)
     return requestPassOn(requestEvent)
   })
 
   // A call the auto-mode check refused: not a tool error, and no dialog.
   on('classic.PermissionDenied', (deniedHost, deniedEvent, deniedPassOn) => {
-    checkedAsks = checkedAsks.filter(ask => ask.id !== deniedEvent.tool_use_id)
-    permissionCalls.add(deniedEvent.tool_use_id)
+    noteDenied(deniedEvent)
     return deniedPassOn(deniedEvent)
   })
 
