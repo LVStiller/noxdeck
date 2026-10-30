@@ -2853,7 +2853,7 @@ describe('secrets never reach the pane', () => {
     'git log -p -1',
     'curl -w "%{http_code}" https://example.com:8080/a',
     'git clone git@github.com:acme/app.git',
-    'curl -sSL https://example.com/data.json | jq .version',
+    'cat -n data.json | jq .version',
     'curl -X POST -H "Content-Type: application/json" -d \'{"a":1}\' https://x',
     'curl -u admin https://x',
     'sort -u names.txt',

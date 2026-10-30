@@ -877,65 +877,65 @@ export const register: Register = (on, options) => {
 
   // A spawn waits until the agent list or its loop's first turn names the
   // agent (pendingSpawns); it passes on unchanged, and its answer unread.
-  on('agent.spawn', async ($, e, next) => {
+  on('agent.spawn', async (spawnHost, spawnEvent, spawnPassOn) => {
     await quietly(async () => {
-      const at = await $.clock.now()
-      const spawn = { promptKey: hashOf(e.prompt), description: maskSecrets(e.description), type: e.subagentType, at }
+      const at = await spawnHost.clock.now()
+      const spawn = { promptKey: hashOf(spawnEvent.prompt), description: maskSecrets(spawnEvent.description), type: spawnEvent.subagentType, at }
       pendingSpawns = [...waitingSpawns(at), spawn].slice(-20)
       // The mascot waves the new agent off; the tick reads the agent list while a spawn waits.
-      await update($, cues, state => ({ ...state, wavedAt: at }))
-      ensureTicker($)
+      await update(spawnHost, cues, state => ({ ...state, wavedAt: at }))
+      ensureTicker(spawnHost)
     })
-    return next(e)
+    return spawnPassOn(spawnEvent)
   })
 
   // A call that reaches the permission check: a PermissionRequest may take
   // it for its dialog. The verdict passes on unread.
-  on('tool.check', ($, e, next) => {
-    const id = e.tool_use_id
+  on('tool.check', (checkHost, checkEvent, checkPassOn) => {
+    const id = checkEvent.tool_use_id
     if (id !== undefined) {
       checkedCalls.add(id)
-      const checked = { id, tool: e.tool, agentId: e.agentId ?? null, input: inputKey(e.input) }
+      const checked = { id, tool: checkEvent.tool, agentId: checkEvent.agentId ?? null, input: inputKey(checkEvent.input) }
       checkedAsks = [...checkedAsks.filter(ask => ask.id !== id), checked].slice(-20)
     }
-    return next(e)
+    return checkPassOn(checkEvent)
   })
 
   // A call a PreToolUse hook may refuse has reached the check too.
-  on('classic.PreToolUse', ($, e, next) => {
-    checkedCalls.add(e.tool_use_id)
-    return next(e)
+  on('classic.PreToolUse', (preToolHost, preToolEvent, preToolPassOn) => {
+    checkedCalls.add(preToolEvent.tool_use_id)
+    return preToolPassOn(preToolEvent)
   })
 
   // The dialog shows while the PermissionRequest hooks run, so the mascot
   // asks from the start, until the call ends; the answer passes on unread.
-  on('classic.PermissionRequest', async ($, e, next) => {
+  on('classic.PermissionRequest', async (requestHost, requestEvent, requestPassOn) => {
     // Its call: the checked ask of this tool and loop with the same input,
     // else the oldest (an ask the auto-mode check settled opens no dialog).
-    const loop = e.agent_id ?? null
-    const input = inputKey(e.tool_input)
-    const candidates = checkedAsks.filter(ask => ask.tool === e.tool_name && ask.agentId === loop)
+    const loop = requestEvent.agent_id ?? null
+    const input = inputKey(requestEvent.tool_input)
+    const candidates = checkedAsks.filter(ask => ask.tool === requestEvent.tool_name && ask.agentId === loop)
     const checked = candidates.find(ask => ask.input === input) ?? candidates[0]
     checkedAsks = checkedAsks.filter(ask => ask !== checked)
-    const asked: Ask = { id: checked?.id ?? null, tool: e.tool_name, agentId: loop }
+    const asked: Ask = { id: checked?.id ?? null, tool: requestEvent.tool_name, agentId: loop }
     if (asked.id !== null) permissionCalls.add(asked.id)
     if (loop !== null) agentsAsking.add(loop)
     await quietly(async () => {
-      const at = await $.clock.now()
-      await update($, cues, state => {
+      const at = await requestHost.clock.now()
+      await update(requestHost, cues, state => {
         const opened = withAsking(state, [...state.asking, asked].slice(-20), at)
         return isApproval(asked) ? { ...opened, approvals: opened.approvals + 1 } : opened
       })
-      ensureTicker($)
+      ensureTicker(requestHost)
     })
-    return next(e)
+    return requestPassOn(requestEvent)
   })
 
   // A call the auto-mode check refused: not a tool error, and no dialog.
-  on('classic.PermissionDenied', ($, e, next) => {
-    checkedAsks = checkedAsks.filter(ask => ask.id !== e.tool_use_id)
-    permissionCalls.add(e.tool_use_id)
-    return next(e)
+  on('classic.PermissionDenied', (deniedHost, deniedEvent, deniedPassOn) => {
+    checkedAsks = checkedAsks.filter(ask => ask.id !== deniedEvent.tool_use_id)
+    permissionCalls.add(deniedEvent.tool_use_id)
+    return deniedPassOn(deniedEvent)
   })
 
   // A call whose tool ran and failed in it, or was interrupted as it ran, and how long it ran.
