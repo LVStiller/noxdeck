@@ -72,7 +72,7 @@ In `/config`, each under `noxdeck.<name>`, or when installing in a shell with `-
 
 ## What this mod can do
 
-`claude plugin validate .` reads the hooks module the way Claude Code loads it and prints every event it hooks and every call it makes on `$`. For noxdeck 1.0.5:
+`claude plugin validate .` reads the hooks module the way Claude Code loads it and prints every event it hooks and every call it makes on `$`. For noxdeck 1.0.6:
 
 ```
 hooks: session.start, command.run{command=noxdeck}, ui.close{id=noxdeck}, tool.call, agent.spawn, tool.check, classic.PreToolUse, classic.PermissionRequest, classic.PermissionDenied, classic.PostToolUseFailure, classic.PostToolUse, turn.step, turn.start, turn.complete, session.measure, session.compact, session.end, ui.render{component=Pane, requestId=noxdeck}, ui.render{component=SessionMode}
@@ -111,7 +111,7 @@ No hook decides whether a tool may run, answers a permission question, or change
 
 ### What it sends, and where
 
-noxdeck makes no network requests. What leaves the module goes to Claude Code on this machine, through these calls on `$`. Each is Claude Code's own mod API; none comes from another plugin, and noxdeck needs no other plugin.
+noxdeck makes no network requests. What leaves the module goes to Claude Code on this machine, through these calls on `$`. Each is Claude Code's own mod API; none comes from another plugin, and noxdeck needs no other plugin. That includes `$.ui.view`, which the plugin directory lists under “Not recognized”: Claude Code's own types declare it (`$.ui.view({ agentId })` and its `ui.view` event).
 
 | Call | What it does |
 | --- | --- |
@@ -145,6 +145,8 @@ noxdeck is not affiliated with Anthropic. It is a hobby project, with no warrant
 Luis Vincent Stiller, [github.com/LVStiller](https://github.com/LVStiller)
 
 ## Support
+
+For help, questions or bug reports, open an issue: [github.com/LVStiller/noxdeck/issues](https://github.com/LVStiller/noxdeck/issues).
 
 If noxdeck is useful to you, you can support it on [Ko-fi](https://ko-fi.com/noxdeck).
 

@@ -72,7 +72,7 @@ In `/config`, jeweils unter `noxdeck.<name>`, oder bei der Installation in einer
 
 ## Was dieser Mod kann
 
-`claude plugin validate .` liest das Hooks-Modul so, wie Claude Code es lädt, und nennt jedes Ereignis, in das es sich einhängt, und jeden Aufruf, den es auf `$` macht. Für noxdeck 1.0.5:
+`claude plugin validate .` liest das Hooks-Modul so, wie Claude Code es lädt, und nennt jedes Ereignis, in das es sich einhängt, und jeden Aufruf, den es auf `$` macht. Für noxdeck 1.0.6:
 
 ```
 hooks: session.start, command.run{command=noxdeck}, ui.close{id=noxdeck}, tool.call, agent.spawn, tool.check, classic.PreToolUse, classic.PermissionRequest, classic.PermissionDenied, classic.PostToolUseFailure, classic.PostToolUse, turn.step, turn.start, turn.complete, session.measure, session.compact, session.end, ui.render{component=Pane, requestId=noxdeck}, ui.render{component=SessionMode}
@@ -111,7 +111,7 @@ Kein Hook entscheidet, ob ein Tool laufen darf, beantwortet eine Berechtigungsfr
 
 ### Was der Mod wohin sendet
 
-noxdeck stellt keine Netzwerkanfragen. Was das Modul verlässt, geht an Claude Code auf diesem Rechner, über diese Aufrufe auf `$`. Jeder gehört zu Claude Codes eigener Mod-API; keiner stammt aus einem anderen Plugin, und noxdeck braucht kein anderes Plugin.
+noxdeck stellt keine Netzwerkanfragen. Was das Modul verlässt, geht an Claude Code auf diesem Rechner, über diese Aufrufe auf `$`. Jeder gehört zu Claude Codes eigener Mod-API; keiner stammt aus einem anderen Plugin, und noxdeck braucht kein anderes Plugin. Das gilt auch für `$.ui.view`, das das Plugin-Verzeichnis unter „Not recognized“ führt: Claude Codes eigene Typen deklarieren es (`$.ui.view({ agentId })` und das Ereignis `ui.view`).
 
 | Aufruf | Was er tut |
 | --- | --- |
@@ -145,6 +145,8 @@ noxdeck steht in keiner Verbindung zu Anthropic. Es ist ein Hobbyprojekt, ohne G
 Luis Vincent Stiller, [github.com/LVStiller](https://github.com/LVStiller)
 
 ## Support
+
+Für Hilfe, Fragen oder Fehlerberichte eröffne ein Issue: [github.com/LVStiller/noxdeck/issues](https://github.com/LVStiller/noxdeck/issues).
 
 Wenn dir noxdeck nützt, kannst du es auf [Ko-fi](https://ko-fi.com/noxdeck) unterstützen.
 

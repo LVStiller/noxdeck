@@ -1,7 +1,8 @@
 {
   "name": "noxdeck",
-  "version": "1.0.5",
-  "description": "A retro terminal dashboard beside the transcript: status with Nox (a pixel picture where the terminal draws pictures, in one of five costumes, in block characters elsewhere), the context window, a radar for loops, failures, hotspots and waits (or Claude's plan), changed files and subagents with their tokens, model and current activity, a press on one showing its transcript. Observes only.",
+  "displayName": "noxdeck",
+  "version": "1.0.6",
+  "description": "A retro terminal dashboard pane for Claude Code: context window, subagents, changed files and a radar for loops, with Nox the pixel owl. Observes only.",
   "author": {
     "name": "Luis Vincent Stiller",
     "url": "https://github.com/LVStiller"
@@ -9,6 +10,20 @@
   "homepage": "https://github.com/LVStiller/noxdeck",
   "repository": "https://github.com/LVStiller/noxdeck",
   "license": "MIT",
+  "keywords": [
+    "dashboard",
+    "context",
+    "tokens",
+    "subagents",
+    "terminal",
+    "pixel-art",
+    "mascot",
+    "tui"
+  ],
+  "supportUrl": "https://github.com/LVStiller/noxdeck/issues",
+  "documentationUrl": "https://github.com/LVStiller/noxdeck#readme",
+  "privacyPolicyUrl": "https://github.com/LVStiller/noxdeck/blob/main/PRIVACY.md",
+  "termsOfServiceUrl": "https://github.com/LVStiller/noxdeck/blob/main/LICENSE",
   "userConfig": {
     "theme": {
       "type": "string",
