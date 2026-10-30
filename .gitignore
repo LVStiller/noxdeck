@@ -3,6 +3,7 @@
 
 # Written by Claude Code each time it loads a mod: the API types and a tsconfig.
 **/.claude-plugin/types/
+/tsconfig.json
 
 # Dependencies, build and test output
 node_modules/
