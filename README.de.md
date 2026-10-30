@@ -4,6 +4,8 @@
 
 [![noxdeck auf Ko-fi unterstützen](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/noxdeck)
 
+<img src="docs/nox-status.gif" width="540" alt="Nox bei der Arbeit im noxdeck-Pane">
+
 Ein Mod für Claude Code: ein Retro-Terminal-Dashboard in einem Pane neben dem Transkript, mit Nox, einer kleinen Pixel-Eule, die zeigt, was Claude gerade tut. Er beobachtet nur.
 
 ![Nox in seinen fünf Kostümen](docs/noxdeck-costumes.png)
