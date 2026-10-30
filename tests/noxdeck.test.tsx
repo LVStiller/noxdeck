@@ -37,16 +37,21 @@ import {
 } from '../hooks/mascot'
 import type { Animations, Scene } from '../hooks/mascot'
 import {
+  bashChangesOf,
   freshOf,
   groupsOf,
+  hiddenCount,
+  isCachePath,
   MAX_AGENTS,
   MAX_OTHER_LOOPS,
+  NO_HIDDEN,
   NO_LEDGER,
   NO_TALLY,
   potsOf,
   processedOf,
   projectPath,
   withAgent,
+  withHidden,
   withLedgerStep,
 } from '../hooks/model'
 import { callKey, callLabel, hotspotsOf, NO_RADAR, normalizedCommand, resetClockOf, withFailure, withFileUses } from '../hooks/radar'
@@ -650,6 +655,128 @@ describe('changes', () => {
       await ui.unmount()
     }
   })
+
+  test('cache files from Bash are counted, not listed; a real file from Bash and an Edit under node_modules are listed', async ($, on) => {
+    engine(on)
+    on('tool.call', (_, e) => {
+      if (e.tool === 'Edit') {
+        const hunk = { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ['-a', '+b'] }
+        return { result: { filePath: e.file_path, structuredPatch: [hunk], originalFile: 'a\n' } }
+      }
+      const hunk = { oldStart: 0, oldLines: 0, newStart: 1, newLines: 2, lines: ['+a', '+b'] }
+      const diff =
+        e.tool === 'Bash' && e.command === 'pytest'
+          ? {
+              files: [],
+              changedFiles: [
+                '/proj/__pycache__/app.cpython-312.pyc',
+                '/proj/tests/__pycache__/test_app.cpython-312-pytest-8.3.4.pyc',
+                '/proj/.pytest_cache/v/cache/nodeids',
+              ],
+              moreFiles: 0,
+            }
+          : {
+              files: [{ filePath: '/proj/models.py', created: true, hunks: [hunk] }],
+              changedFiles: ['/proj/models.py', '/proj/__pycache__/gen.cpython-312.pyc'],
+              moreFiles: 0,
+            }
+      return { result: { stdout: '', stderr: '', interrupted: false, bashEditDiff: diff } }
+    })
+    await start($)
+    await $.tool.call({ tool: 'Edit', file_path: '/proj/node_modules/pkg/index.js', old_string: 'a', new_string: 'b' })
+    let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await ui.press({ key: 'tab-changes' })
+    expect(await ui.find({ type: 'Text', text: 'node_modules/pkg/index.js' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /ausgeblendet/ })).toBeUndefined()
+    await ui.unmount()
+
+    await $.tool.call({ tool: 'Bash', command: 'pytest' })
+    await $.tool.call({ tool: 'Bash', command: 'pytest' })
+    await $.tool.call({ tool: 'Bash', command: 'python gen.py' })
+    ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect(await ui.find({ type: 'Text', text: 'models.py' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^neu \+2 −0$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'node_modules/pkg/index.js' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /pycache|pytest_cache|\.pyc$/ })).toBeUndefined()
+    // pytest's three files, twice, and the generator's .pyc: four files.
+    expect(await ui.find({ type: 'Text', text: '+4 Cache-Dateien ausgeblendet' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '2 Dateien · +3 −1' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('in English: the cache files hidden under an empty list; files a command named no path for still count', { options: { language: 'en' } }, async ($, on) => {
+    engine(on)
+    on('tool.call', (_, e) => {
+      const diff =
+        e.tool === 'Bash' && e.command === 'npm install'
+          ? { files: [], changedFiles: ['/proj/node_modules/.package-lock.json'], moreFiles: 3 }
+          : { files: [], changedFiles: ['/proj/.DS_Store', '/proj/.venv/bin/python'], moreFiles: 0 }
+      return { result: { stdout: '', stderr: '', interrupted: false, bashEditDiff: diff } }
+    })
+    await start($)
+    await $.tool.call({ tool: 'Bash', command: 'uv venv' })
+    let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await ui.press({ key: 'tab-changes' })
+    expect(await ui.find({ type: 'Text', text: 'no edits yet' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '+2 cache files hidden' })).toBeDefined()
+    await ui.unmount()
+
+    await $.tool.call({ tool: 'Bash', command: 'npm install' })
+    ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect(await ui.find({ type: 'Text', text: '+2 files without lines (n/a)' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '+3 cache files hidden' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('the cache line in both languages, one file and more', () => {
+    expect(stringsOf('de').changes.cacheFiles(1)).toBe('+1 Cache-Datei ausgeblendet')
+    expect(stringsOf('de').changes.cacheFiles(4)).toBe('+4 Cache-Dateien ausgeblendet')
+    expect(stringsOf('en').changes.cacheFiles(1)).toBe('+1 cache file hidden')
+    expect(stringsOf('en').changes.cacheFiles(4)).toBe('+4 cache files hidden')
+  })
+
+  test('cache paths: those folders anywhere in the path, .pyc, .pyo and .DS_Store; look-alikes are not', () => {
+    const hidden = [
+      '/p/__pycache__/app.cpython-312.pyc',
+      '/p/.pytest_cache/v/cache/lastfailed',
+      '/p/.mypy_cache/3.12/app.meta.json',
+      '/p/.ruff_cache/0.6.9/12345',
+      '/p/web/node_modules/left-pad/index.js',
+      '/p/.venv/lib/python3.12/site-packages/x.py',
+      '/p/.git/index',
+      '/p/legacy/mod.pyc',
+      '/p/legacy/mod.pyo',
+      '/p/docs/.DS_Store',
+      'C:\\p\\node_modules\\x\\index.js',
+      'node_modules/x/y.js',
+    ]
+    const shown = [
+      '/p/app.py',
+      '/p/.github/workflows/ci.yml',
+      '/p/.gitignore',
+      '/p/venv/x.py',
+      '/p/src/pycache.py',
+      '/p/node_modules.md',
+      '/p/docs/notes.pyc.md',
+      '/p/.DS_Store.bak',
+    ]
+    expect(hidden.filter(path => !isCachePath(path))).toEqual([])
+    expect(shown.filter(isCachePath)).toEqual([])
+  })
+
+  test('cache files count each path once; past the cap the oldest fall off the list and stay counted', () => {
+    expect(bashChangesOf({ bashEditDiff: { files: [], changedFiles: ['/p/a.pyc', '/p/b.py'], moreFiles: 3 } })).toEqual({
+      changes: [{ path: '/p/b.py', added: null, removed: null, isNew: false, isDeleted: false }],
+      hidden: ['/p/a.pyc'],
+      missed: 1,
+    })
+    let hidden = withHidden(NO_HIDDEN, ['/p/a.pyc', '/p/b.pyc', '/p/a.pyc'], 3)
+    expect(hidden).toEqual({ paths: ['/p/a.pyc', '/p/b.pyc'], evicted: 0 })
+    expect(withHidden(hidden, ['/p/b.pyc'], 3)).toBe(hidden)
+    hidden = withHidden(hidden, ['/p/c.pyc', '/p/d.pyc'], 3)
+    expect(hidden).toEqual({ paths: ['/p/c.pyc', '/p/d.pyc', '/p/a.pyc'], evicted: 1 })
+    expect(hiddenCount(hidden)).toBe(4)
+  })
 })
 
 describe('agents', () => {
@@ -1140,7 +1267,7 @@ describe('hot reload from an older version', () => {
   // the new module's scan: a key the new module never names is refused there
   // ("$.state.get refused: its hooks module does not refer to noxdeck.hasTodoTool").
   const READ_WHILE_DRAWING = [
-    'tab', 'plan', 'context', 'usage', 'fiveHour', 'activity', 'changes', 'missedFiles', 'agents', 'root', 'now',
+    'tab', 'plan', 'context', 'usage', 'fiveHour', 'activity', 'changes', 'missedFiles', 'hiddenFiles', 'agents', 'root', 'now',
     'hasTodoTool', 'isDismissed', 'cues', 'pose', 'turn', 'pace', 'todoTools', 'agentBoard', 'agentFolds', 'isProcessedOpen',
   ]
 

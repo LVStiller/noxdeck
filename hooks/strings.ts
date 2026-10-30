@@ -112,6 +112,8 @@ export type Strings = {
     moreRows: (count: number) => string
     /** Files a diff named no lines for. */
     missed: (count: number) => string
+    /** Cache and build files Bash commands changed: counted, not listed. */
+    cacheFiles: (count: number) => string
     isNew: string
     deleted: string
     note: string
@@ -280,6 +282,7 @@ const de: Strings = {
     empty: 'noch keine Änderungen',
     moreRows: count => `+${count} weitere ${count === 1 ? 'Datei' : 'Dateien'}`,
     missed: count => `+${count} ${count === 1 ? 'Datei' : 'Dateien'} ohne Zeilen (n/a)`,
+    cacheFiles: count => `+${count} ${count === 1 ? 'Cache-Datei' : 'Cache-Dateien'} ausgeblendet`,
     isNew: 'neu',
     deleted: 'gelöscht',
     note: 'Zeilen summiert, seit Laden',
@@ -428,6 +431,7 @@ const en: Strings = {
     empty: 'no edits yet',
     moreRows: count => `+${count} more ${count === 1 ? 'file' : 'files'}`,
     missed: count => `+${count} ${count === 1 ? 'file' : 'files'} without lines (n/a)`,
+    cacheFiles: count => `+${count} cache ${count === 1 ? 'file' : 'files'} hidden`,
     isNew: 'new',
     deleted: 'deleted',
     note: 'lines summed, since load',

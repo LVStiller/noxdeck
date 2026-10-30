@@ -12,7 +12,7 @@ A Claude Code mod: a retro terminal dashboard in a pane beside the transcript, w
   - **STATUS**: the file Claude is editing, the 5-hour limit as five hearts or a ten-cell bar with the time it resets, and Nox with a caption (working, ready, needs your approval, asking you, error, done, agents at work).
   - **CONTEXT**: how full the context window is, by source (messages, MCP, tools, memory, skills, system), a history, growth per turn, cache hit rate and how much is left until auto-compaction.
   - **RADAR**: the same call failing again and again, failures since load, the files read or edited most (hotspots) and how long approval dialogs waited on you. While the session has a todo tool, **PLAN** shows Claude's todo list in its place.
-- **Changes**: the files changed in this session, with lines added and removed, each by its path from the project folder.
+- **Changes**: the files changed in this session, with lines added and removed, each by its path from the project folder. Cache and build files a Bash command makes on the side (in `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `node_modules`, `.venv` or `.git`, `*.pyc`, `*.pyo`, `.DS_Store`) are counted below the list, not listed; an Edit or Write there is always listed.
 - **Agents**: what the main chat, the subagents and other loops processed since load, each subagent's model, tokens and current activity, in groups that fold, and a timeline. A press on an agent's row shows its transcript in the main view.
 
 Nox is a pixel picture where the terminal draws pictures (Ghostty, kitty; iTerm2 3.5 and later in fullscreen rendering; tmux with `allow-passthrough` and `focus-events` on) and block characters everywhere else. It reads, writes, runs the shell, thinks, waves when a subagent starts, waits for you, is glad when the turn is done, startles at a failure, warns of a loop, sweats when the context fills up, gets tired when the 5-hour limit runs low, and yawns and sleeps after two minutes without a turn. Where the pane is short, a mini owl takes its place.
@@ -58,7 +58,7 @@ In `/config`, each under `noxdeck.<name>`, or when installing in a shell with `-
 
 ## What this mod can do
 
-`claude plugin validate .` reads the hooks module the way Claude Code loads it and prints every event it hooks and every call it makes on `$`. For noxdeck 1.0.1:
+`claude plugin validate .` reads the hooks module the way Claude Code loads it and prints every event it hooks and every call it makes on `$`. For noxdeck 1.0.2:
 
 ```
 hooks: session.start, command.run{command=noxdeck}, ui.close{id=noxdeck}, tool.call, agent.spawn, tool.check, classic.PreToolUse, classic.PermissionRequest, classic.PermissionDenied, classic.PostToolUseFailure, classic.PostToolUse, turn.step, turn.start, turn.complete, session.measure, session.compact, session.end, ui.render{component=Pane, requestId=noxdeck}, ui.render{component=SessionMode}

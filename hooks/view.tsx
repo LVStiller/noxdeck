@@ -905,7 +905,7 @@ export function statusCard(ui: Ui, view: StatusView, owl: Owl): Drawn {
 
 const MAX_ROWS = 80
 
-export function changesCard(ui: Ui, changes: readonly FileChange[], missed: number, root: string): RenderElement {
+export function changesCard(ui: Ui, changes: readonly FileChange[], missed: number, cacheFiles: number, root: string): RenderElement {
   const { Text, theme, s } = ui
   const known = changes.filter(change => change.added !== null && change.removed !== null)
   const added = known.reduce((total, change) => total + (change.added ?? 0), 0)
@@ -935,7 +935,7 @@ export function changesCard(ui: Ui, changes: readonly FileChange[], missed: numb
     )
 
   // Rows left out for room keep their counts in the counter; files a diff
-  // named no lines for are n/a.
+  // named no lines for are n/a; a Bash command's cache files are only counted.
   const hidden = Math.max(0, changes.length - MAX_ROWS)
   return card(
     ui,
@@ -945,6 +945,7 @@ export function changesCard(ui: Ui, changes: readonly FileChange[], missed: numb
       changes.length === 0 && missed === 0 ? <Text dimColor>{s.changes.empty}</Text> : changes.slice(0, MAX_ROWS).map(row),
       hidden > 0 ? <Text dimColor>{s.changes.moreRows(hidden)}</Text> : null,
       missed > 0 ? <Text dimColor>{s.changes.missed(missed)}</Text> : null,
+      cacheFiles > 0 ? <Text dimColor>{s.changes.cacheFiles(cacheFiles)}</Text> : null,
       <Text dimColor>{s.changes.note}</Text>,
     ],
     0,

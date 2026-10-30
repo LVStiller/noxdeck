@@ -289,6 +289,9 @@ export type FileChange = {
   at: number
 }
 
+/** Cache and build files Bash commands changed, left out of CHANGES: the newest distinct paths, and how many fell off past the cap. */
+export type HiddenFiles = { paths: string[]; evicted: number }
+
 export type AgentRow = {
   id: string
   /** From its agent.spawn or $.agent.list(); null for loops neither names. */
@@ -408,6 +411,8 @@ declare module 'claude-code' {
       changes: Shaped<FileChange[]>
       /** Files a Bash diff named no path for, or past the list's cap: counted, not listed. */
       missedFiles: Shaped<number>
+      /** A Bash command's cache and build files: counted below CHANGES, not listed. */
+      hiddenFiles: Shaped<HiddenFiles>
       agents: Shaped<AgentRow[]>
       root: Shaped<string>
       now: Shaped<number>

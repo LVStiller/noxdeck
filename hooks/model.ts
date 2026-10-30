@@ -9,6 +9,7 @@ import type {
   ContextSnapshot,
   ExactFill,
   FileChange,
+  HiddenFiles,
   PlanStep,
   RateWindow,
   StepStatus,
@@ -202,15 +203,26 @@ export function changeOf(tool: string, input: Loose, result: unknown): ObservedC
   return null
 }
 
+/** Folders a command fills on the side: caches, dependencies, a virtualenv, git's own store. */
+const CACHE_FOLDERS = new Set(['__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', 'node_modules', '.venv', '.git'])
+
+/** A file a command makes on the side: in a cache or build folder, compiled Python, Finder's .DS_Store. */
+export function isCachePath(path: string): boolean {
+  const folders = path.split(/[\\/]/)
+  const name = folders.pop() ?? ''
+  return folders.some(folder => CACHE_FOLDERS.has(folder)) || name.endsWith('.pyc') || name.endsWith('.pyo') || name === '.DS_Store'
+}
+
 /**
  * The files a Bash command changed, from its record's `bashEditDiff`: an
  * internal field of this build, read only when it is there and well formed.
- * A file it names without hunks has unknown counts; `missed` counts the
- * changed files it gives no path for at all.
+ * A file it names without hunks has unknown counts; a cache file
+ * (`isCachePath`) is only named in `hidden`; `missed` counts the changed
+ * files it gives no path for at all.
  */
-export function bashChangesOf(result: unknown): { changes: ObservedChange[]; missed: number } {
+export function bashChangesOf(result: unknown): { changes: ObservedChange[]; hidden: string[]; missed: number } {
   const diff = isObject(result) && isObject(result.bashEditDiff) ? result.bashEditDiff : null
-  if (diff === null) return { changes: [], missed: 0 }
+  if (diff === null) return { changes: [], hidden: [], missed: 0 }
 
   const changes: ObservedChange[] = []
   const files = Array.isArray(diff.files) ? diff.files : []
@@ -236,8 +248,25 @@ export function bashChangesOf(result: unknown): { changes: ObservedChange[]; mis
     }
   }
   const more = typeof diff.moreFiles === 'number' ? diff.moreFiles : 0
-  return { changes, missed: Math.max(0, files.length + more - shown.size) }
+  return {
+    changes: changes.filter(change => !isCachePath(change.path)),
+    hidden: [...shown].filter(isCachePath),
+    missed: Math.max(0, files.length + more - shown.size),
+  }
 }
+
+export const NO_HIDDEN: HiddenFiles = { paths: [], evicted: 0 }
+
+/** Adds a command's cache files, each path once; past `max` the oldest fall off the list and stay counted. */
+export function withHidden(hidden: HiddenFiles, paths: readonly string[], max: number): HiddenFiles {
+  const known = new Set(hidden.paths)
+  const fresh = [...new Set(paths)].filter(path => !known.has(path))
+  if (fresh.length === 0) return hidden
+  const all = [...fresh, ...hidden.paths]
+  return { paths: all.slice(0, max), evicted: hidden.evicted + Math.max(0, all.length - max) }
+}
+
+export const hiddenCount = (hidden: HiddenFiles): number => hidden.paths.length + hidden.evicted
 
 const sum = (a: number | null, b: number | null): number | null => (a === null || b === null ? null : a + b)
 

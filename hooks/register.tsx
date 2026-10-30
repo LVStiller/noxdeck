@@ -24,9 +24,11 @@ import {
   effortText,
   exactOf,
   fiveHourOf,
+  hiddenCount,
   isAgentLive,
   lastAgents,
   NO_FOLDS,
+  NO_HIDDEN,
   NO_LEDGER,
   planFromTaskList,
   planFromTodos,
@@ -37,6 +39,7 @@ import {
   withAgent,
   withChange,
   withFold,
+  withHidden,
   withLedgerStep,
   withWork,
 } from './model'
@@ -139,6 +142,7 @@ const fiveHour = atom({ plugin: 'noxdeck', key: 'fiveHour' } as const, null, SHA
 const activity = atom({ plugin: 'noxdeck', key: 'activity' } as const, IDLE, SHAPE)
 const changes = atom({ plugin: 'noxdeck', key: 'changes' } as const, [], SHAPE)
 const missedFiles = atom({ plugin: 'noxdeck', key: 'missedFiles' } as const, 0, SHAPE)
+const hiddenFiles = atom({ plugin: 'noxdeck', key: 'hiddenFiles' } as const, NO_HIDDEN, SHAPE)
 const agents = atom({ plugin: 'noxdeck', key: 'agents' } as const, [], SHAPE)
 const root = atom({ plugin: 'noxdeck', key: 'root' } as const, '', SHAPE)
 const now = atom({ plugin: 'noxdeck', key: 'now' } as const, 0, SHAPE)
@@ -749,7 +753,7 @@ export const register: Register = (on, options) => {
         }
       }
 
-      const fromBash = e.tool === 'Bash' && result !== undefined ? bashChangesOf(result) : { changes: [], missed: 0 }
+      const fromBash = e.tool === 'Bash' && result !== undefined ? bashChangesOf(result) : { changes: [], hidden: [], missed: 0 }
       const observed: ObservedChange[] =
         e.tool === 'Bash'
           ? fromBash.changes
@@ -792,13 +796,18 @@ export const register: Register = (on, options) => {
         await update($, todoTools, state => (state.isUsed ? state : { ...state, isUsed: true }))
       }
 
-      if (observed.length > 0) {
+      // A Bash command's cache files are counted, not listed; an Edit or Write
+      // there is listed like any other.
+      if (observed.length + fromBash.hidden.length > 0) {
         let evicted = 0
-        await update($, changes, list => {
-          const all = observed.reduce((files, change) => withChange(files, change, at), list)
-          evicted = Math.max(0, all.length - MAX_FILES)
-          return all.slice(0, MAX_FILES)
-        })
+        if (observed.length > 0) {
+          await update($, changes, list => {
+            const all = observed.reduce((files, change) => withChange(files, change, at), list)
+            evicted = Math.max(0, all.length - MAX_FILES)
+            return all.slice(0, MAX_FILES)
+          })
+        }
+        if (fromBash.hidden.length > 0) await update($, hiddenFiles, state => withHidden(state, fromBash.hidden, MAX_FILES))
         if (evicted + fromBash.missed > 0) await update($, missedFiles, n => n + evicted + fromBash.missed)
       }
 
@@ -1062,6 +1071,7 @@ export const register: Register = (on, options) => {
         await update($, plan, () => [])
         await update($, changes, () => [])
         await update($, missedFiles, () => 0)
+        await update($, hiddenFiles, () => NO_HIDDEN)
         await update($, agents, () => [])
         await update($, usage, () => NO_USAGE)
         await update($, activity, () => IDLE)
@@ -1109,7 +1119,8 @@ export const register: Register = (on, options) => {
       })()
 
     if (shown === 'changes') {
-      return frame(ui, shown, onTab, changesCard(ui, await read($, changes), await read($, missedFiles), await read($, root)), probeSource)
+      const cacheFiles = hiddenCount(await read($, hiddenFiles))
+      return frame(ui, shown, onTab, changesCard(ui, await read($, changes), await read($, missedFiles), cacheFiles, await read($, root)), probeSource)
     }
     if (shown === 'agents') {
       // The snapshot alone: the tab redraws at most once a second. The full
