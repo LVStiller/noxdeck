@@ -2,6 +2,8 @@
 
 **English** · [Deutsch](README.de.md)
 
+[![Support noxdeck on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/noxdeck)
+
 A Claude Code mod: a retro terminal dashboard in a pane beside the transcript, with Nox, a small pixel owl that shows what Claude is doing. It only observes.
 
 ![Nox in its five costumes](docs/noxdeck-costumes.png)
