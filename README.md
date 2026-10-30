@@ -6,6 +6,16 @@ A Claude Code mod: a retro terminal dashboard in a pane beside the transcript, w
 
 ![Nox in its five costumes](docs/noxdeck-costumes.png)
 
+## Screenshots
+
+<table>
+  <tr>
+    <td valign="top"><img src="docs/noxdeck-live.png" width="280" alt="noxdeck Live tab: status with Nox, context window and radar"><br>Live</td>
+    <td valign="top"><img src="docs/noxdeck-agents.png" width="280" alt="noxdeck Agents tab: three subagents running with tokens and timeline"><br>Agents</td>
+    <td valign="top"><img src="docs/noxdeck-changes.png" width="280" alt="noxdeck Changes tab: files changed in this session with lines added and removed"><br>Changes</td>
+  </tr>
+</table>
+
 ## What it shows
 
 - **Live** (the default tab):
@@ -89,3 +99,5 @@ Luis Vincent Stiller, [github.com/LVStiller](https://github.com/LVStiller)
 ## Support
 
 If noxdeck is useful to you, you can support it on [Ko-fi](https://ko-fi.com/noxdeck).
+
+[![Support noxdeck on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/noxdeck)

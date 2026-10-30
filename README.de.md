@@ -6,6 +6,16 @@ Ein Mod für Claude Code: ein Retro-Terminal-Dashboard in einem Pane neben dem T
 
 ![Nox in seinen fünf Kostümen](docs/noxdeck-costumes.png)
 
+## Screenshots
+
+<table>
+  <tr>
+    <td valign="top"><img src="docs/noxdeck-live.png" width="280" alt="noxdeck-Tab Live: Status mit Nox, Kontextfenster und Radar"><br>Live</td>
+    <td valign="top"><img src="docs/noxdeck-agents.png" width="280" alt="noxdeck-Tab Agents: drei laufende Subagents mit Tokens und Zeitleiste"><br>Agents</td>
+    <td valign="top"><img src="docs/noxdeck-changes.png" width="280" alt="noxdeck-Tab Changes: in dieser Sitzung geänderte Dateien mit hinzugefügten und entfernten Zeilen"><br>Changes</td>
+  </tr>
+</table>
+
 ## Was er zeigt
 
 - **Live** (der Standard-Tab):
@@ -89,3 +99,5 @@ Luis Vincent Stiller, [github.com/LVStiller](https://github.com/LVStiller)
 ## Support
 
 Wenn dir noxdeck nützt, kannst du es auf [Ko-fi](https://ko-fi.com/noxdeck) unterstützen.
+
+[![noxdeck auf Ko-fi unterstützen](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/noxdeck)
