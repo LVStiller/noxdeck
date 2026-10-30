@@ -51,6 +51,7 @@ import {
   callLabel,
   ENDS_AT_ANSWER,
   filePathOf,
+  hashOf,
   isApproval,
   NO_RADAR,
   TODO_TOOLS,
@@ -225,6 +226,15 @@ async function refreshTodoTools($: EngineInterface): Promise<void> {
 async function refreshAgents($: EngineInterface): Promise<void> {
   const listed = await $.agent.list()
   const at = await $.clock.now()
+  // An agent the list names for the first time takes its spawn off the
+  // waiting list: spawned since load, it is seen from its start, its tokens
+  // the Agents pot's.
+  const named = new Set((await read($, agents)).filter(row => row.description !== null).map(row => row.id))
+  const spawned = listed.filter(info => {
+    const name = maskSecrets(info.description)
+    return !named.has(info.id) && takeSpawn(at, waiting => waiting.find(one => one.description === name)) !== undefined
+  })
+  if (spawned.length > 0) await update($, agentLedger, ledger => spawned.reduce((sum, info) => withAgent(sum, info.id), ledger))
   await update($, agents, rows => {
     const next = rows.map(row => {
       const info = listed.find(one => one.id === row.id)
@@ -356,19 +366,50 @@ let isTicking = false
 let calls = 0
 
 // A permission dialog names no call (its PermissionRequest carries none), so
-// the calls tool.check put to one wait here, oldest first, with their input,
-// until their PermissionRequest takes them. What a call met on its way is
-// kept by its tool_use_id until its tool.call ends: a permission decision (a
-// dialog, or a deny by a rule, a hook or the auto-mode check), the tool
-// failing as it ran, how long it ran. Each is this module's: a reload
-// drops them, and an ask then falls back to its tool and loop.
+// the calls that reach the permission check wait here, oldest first, with
+// their input, until a PermissionRequest takes one or the call ends. What a
+// call met on its way is kept by its tool_use_id until its tool.call ends:
+// the check reached, a dialog or the auto-mode check's refusal, its tool
+// having run (or failed as it ran), how long it ran. The permission hooks
+// pass their events on unread, so a call that reached the check and came
+// back errored with its tool never run was refused there (by a rule, the
+// mode or a PreToolUse hook). Each is this module's: a reload drops them,
+// and an ask then falls back to its tool and loop.
 let checkedAsks: (Ask & { input: string })[] = []
+const checkedCalls = new Set<string>()
 const permissionCalls = new Set<string>()
 const failedCalls = new Map<string, 'error' | 'interrupt'>()
+/** Calls whose tool ran: a PostToolUse or PostToolUseFailure was heard. */
+const ranCalls = new Set<string>()
 /** How long each call's tool ran (PostToolUse's duration_ms: no dialog, no hook time), any loop. */
 const ranMs = new Map<string, number>()
 /** Subagents with a dialog open: only their calls need to look for one to end. */
 const agentsAsking = new Set<string>()
+
+/** How long a spawn waits for its loop's first turn; one refused or run elsewhere starts none here. */
+const SPAWN_WAIT_MS = 30_000
+
+/** A spawn waiting to be named: its prompt only as a hash, to tell its loop's first turn by. */
+type PendingSpawn = { promptKey: string; description: string; type: string; at: number }
+
+// agent.spawn passes its answer on unread, so a new agent's id comes from
+// elsewhere: the agent list names a subagent of the Agent tool; one it never
+// names (a workflow's) is known by its loop's first turn, which starts with
+// the spawn's prompt. Until then the spawn waits here.
+let pendingSpawns: PendingSpawn[] = []
+
+/** The spawns still waiting at `at`; older ones are dropped. */
+function waitingSpawns(at: number): readonly PendingSpawn[] {
+  pendingSpawns = pendingSpawns.filter(one => at - one.at <= SPAWN_WAIT_MS)
+  return pendingSpawns
+}
+
+/** Takes off the list the spawn that `pick` finds among those waiting at `at`. */
+function takeSpawn(at: number, pick: (waiting: readonly PendingSpawn[]) => PendingSpawn | undefined): PendingSpawn | undefined {
+  const spawn = pick(waitingSpawns(at))
+  pendingSpawns = pendingSpawns.filter(one => one !== spawn)
+  return spawn
+}
 
 /** A tool input as a key two events of one call share. */
 function inputKey(input: unknown): string {
@@ -401,7 +442,7 @@ async function tick($: EngineInterface): Promise<void> {
   const isNewSecond = Math.floor(at / 1000) !== lastSecond
   if (isNewSecond) {
     lastSecond = Math.floor(at / 1000)
-    if ((await read($, agents)).some(isAgentLive)) await refreshAgents($)
+    if (waitingSpawns(at).length > 0 || (await read($, agents)).some(isAgentLive)) await refreshAgents($)
   }
   if (await isPaneShown($)) {
     // Clocks, the done state and the Agents tab move on once a second, the mascot every step.
@@ -716,15 +757,18 @@ export const register: Register = (on, options) => {
           return withAsking({ ...state, running }, withoutAsk(state.asking, asked), at, isApprox)
         })
       })
-      wasDecided = permissionCalls.delete(call.id)
+      wasDecided = permissionCalls.delete(call.id) || (checkedCalls.has(call.id) && !ranCalls.has(call.id))
+      checkedCalls.delete(call.id)
+      ranCalls.delete(call.id)
       ranMs.delete(call.id)
     }
     const answer = reply as Awaited<ReturnType<typeof next>>
-    // A call refused at a dialog, by a rule, a hook or the auto-mode check
-    // comes back errored too; only one the tool failed in as it ran (a Bash
-    // command's exit code other than 0 among them), or that failed with no
-    // permission decision on its way, is a failure: it startles the mascot
-    // and counts on RADAR.
+    // A call refused at a dialog, at the check (a rule, the mode, a PreToolUse
+    // hook) or by the auto-mode check comes back errored too; only one the
+    // tool failed in as it ran (a Bash command's exit code other than 0 among
+    // them), or that failed with no permission decision on its way (its input
+    // refused before the check), is a failure: it startles the mascot and
+    // counts on RADAR.
     const isScare = answer.isError === true && (failure === 'error' || (failure === undefined && !wasAsked && !wasDecided))
 
     if (e.agentId !== undefined) {
@@ -831,47 +875,40 @@ export const register: Register = (on, options) => {
     return answer
   })
 
+  // A spawn waits until the agent list or its loop's first turn names the
+  // agent (pendingSpawns); it passes on unchanged, and its answer unread.
   on('agent.spawn', async ($, e, next) => {
-    const spawned = await next(e)
     await quietly(async () => {
-      if (spawned.deny !== undefined || spawned.agentId === undefined) return
-      const id = spawned.agentId
       const at = await $.clock.now()
-      await update($, agents, rows =>
-        upsertAgent(rows, id, at, row => ({ ...row, description: maskSecrets(e.description), type: e.subagentType })),
-      )
-      // A subagent, a workflow's too: its tokens are the Agents pot's, the steps heard before this answer included.
-      await update($, agentLedger, ledger => withAgent(ledger, id))
-      // The mascot waves the new agent off.
+      const spawn = { promptKey: hashOf(e.prompt), description: maskSecrets(e.description), type: e.subagentType, at }
+      pendingSpawns = [...waitingSpawns(at), spawn].slice(-20)
+      // The mascot waves the new agent off; the tick reads the agent list while a spawn waits.
       await update($, cues, state => ({ ...state, wavedAt: at }))
       ensureTicker($)
     })
-    return spawned
+    return next(e)
   })
 
-  // A call the permission check puts to a dialog, kept until its
-  // PermissionRequest takes it; one it refuses, noted.
-  on('tool.check', async ($, e, next) => {
-    const verdict = await next(e)
+  // A call that reaches the permission check: a PermissionRequest may take
+  // it for its dialog. The verdict passes on unread.
+  on('tool.check', ($, e, next) => {
     const id = e.tool_use_id
-    if (id !== undefined && verdict?.decision === 'ask') {
+    if (id !== undefined) {
+      checkedCalls.add(id)
       const checked = { id, tool: e.tool, agentId: e.agentId ?? null, input: inputKey(e.input) }
       checkedAsks = [...checkedAsks.filter(ask => ask.id !== id), checked].slice(-20)
     }
-    if (id !== undefined && verdict?.decision === 'deny') permissionCalls.add(id)
-    return verdict
+    return next(e)
   })
 
-  // A call a PreToolUse hook refused.
-  on('classic.PreToolUse', async ($, e, next) => {
-    const decided = await next(e)
-    if (decided?.deny !== undefined) permissionCalls.add(e.tool_use_id)
-    return decided
+  // A call a PreToolUse hook may refuse has reached the check too.
+  on('classic.PreToolUse', ($, e, next) => {
+    checkedCalls.add(e.tool_use_id)
+    return next(e)
   })
 
   // The dialog shows while the PermissionRequest hooks run, so the mascot
-  // asks from the start; it stops when a hook beneath decides, or when the
-  // call ends.
+  // asks from the start, until the call ends; the answer passes on unread.
   on('classic.PermissionRequest', async ($, e, next) => {
     // Its call: the checked ask of this tool and loop with the same input,
     // else the oldest (an ask the auto-mode check settled opens no dialog).
@@ -891,42 +928,29 @@ export const register: Register = (on, options) => {
       })
       ensureTicker($)
     })
-    const answered = await next(e)
-    if (answered?.decision !== undefined) {
-      const isAsked = (ask: Ask) => ask.id === asked.id && ask.tool === asked.tool && ask.agentId === asked.agentId
-      // A hook decided: no approval the person gave.
-      await quietly(async () => {
-        const at = await $.clock.now()
-        await update($, cues, state => {
-          const closed = withAsking(state, withoutAsk(state.asking, state.asking.findIndex(isAsked)), at)
-          return isApproval(asked) ? { ...closed, approvals: Math.max(0, closed.approvals - 1) } : closed
-        })
-      })
-    }
-    return answered
+    return next(e)
   })
 
   // A call the auto-mode check refused: not a tool error, and no dialog.
-  on('classic.PermissionDenied', async ($, e, next) => {
-    const denied = await next(e)
+  on('classic.PermissionDenied', ($, e, next) => {
     checkedAsks = checkedAsks.filter(ask => ask.id !== e.tool_use_id)
     permissionCalls.add(e.tool_use_id)
-    return denied
+    return next(e)
   })
 
-  // A call the tool itself failed in, or that was interrupted as it ran, and how long it ran.
-  on('classic.PostToolUseFailure', async ($, e, next) => {
-    const failed = await next(e)
+  // A call whose tool ran and failed in it, or was interrupted as it ran, and how long it ran.
+  on('classic.PostToolUseFailure', ($, e, next) => {
+    ranCalls.add(e.tool_use_id)
     failedCalls.set(e.tool_use_id, e.is_interrupt === true ? 'interrupt' : 'error')
     if (typeof e.duration_ms === 'number') ranMs.set(e.tool_use_id, e.duration_ms)
-    return failed
+    return next(e)
   })
 
-  // How long a call's tool ran: the wait for its approval ended that much before the call did.
-  on('classic.PostToolUse', async ($, e, next) => {
-    const done = await next(e)
+  // A call whose tool ran, and how long: the wait for its approval ended that much before the call did.
+  on('classic.PostToolUse', ($, e, next) => {
+    ranCalls.add(e.tool_use_id)
     if (typeof e.duration_ms === 'number') ranMs.set(e.tool_use_id, e.duration_ms)
-    return done
+    return next(e)
   })
 
   // Every model request's tokens, read once its response is whole: the
@@ -962,9 +986,30 @@ export const register: Register = (on, options) => {
         await update($, radar, withNewTurn)
       } else {
         const id = e.agentId
+        // A loop nothing has named yet: the agent list names a subagent of
+        // the Agent tool; one it does not (a workflow's agent) takes the
+        // spawn whose prompt its first turn starts with (for a turn that
+        // starts with none, the oldest waiting), and with it its name, its
+        // type and its tokens as the Agents pot's.
+        const isNamed = async () => (await read($, agents)).some(row => row.id === id && row.description !== null)
+        let spawn: PendingSpawn | undefined
+        if (!(await isNamed())) {
+          await refreshAgents($)
+          if (!(await isNamed())) {
+            const key = hashOf(e.text)
+            spawn = takeSpawn(at, waiting => waiting.find(one => one.promptKey === key) ?? (e.text === '' ? waiting[0] : undefined))
+          }
+        }
         await update($, agents, rows =>
-          upsertAgent(rows, id, at, row => ({ ...row, turnStartedAt: at, isTimed: true, endReason: null })),
+          upsertAgent(rows, id, at, row => ({
+            ...row,
+            ...(spawn === undefined ? {} : { description: spawn.description, type: spawn.type }),
+            turnStartedAt: at,
+            isTimed: true,
+            endReason: null,
+          })),
         )
+        if (spawn !== undefined) await update($, agentLedger, ledger => withAgent(ledger, id))
         // Its first turn's start, for the group's duration and the timeline.
         await update($, agentLedger, ledger => withWork(ledger, id, work => ({ ...work, startedAt: work.startedAt ?? at })))
       }
@@ -1084,10 +1129,13 @@ export const register: Register = (on, options) => {
         await update($, agentFolds, () => NO_FOLDS)
         boardKey = ''
         checkedAsks = []
+        checkedCalls.clear()
         permissionCalls.clear()
         failedCalls.clear()
+        ranCalls.clear()
         ranMs.clear()
         agentsAsking.clear()
+        pendingSpawns = []
         await update($, context, () => null)
         $.clock.after(1000, () => void quietly(() => refreshContext($, false)))
       })

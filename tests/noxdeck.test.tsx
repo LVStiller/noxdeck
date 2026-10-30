@@ -261,6 +261,7 @@ function engine(on: On, world: World = {}) {
   })
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('classic.PostToolUseFailure', () => ({}))
   on('session.measure', (_, e) => ({ changed: e.changed }))
   on('ui.blit', (_, e) => {
     if ('source' in e) world.blits?.push({ ...e, at: clock.now() })
@@ -532,7 +533,7 @@ describe('status', () => {
       const line = await ui.find({ type: 'Text', text: /^✎ (bearbeitet|noch)/ })
       editingSeen.push(`${line?.text} ${String(line?.props.color)}`)
       await ui.unmount()
-      if (e.tool === 'Bash') return { isError: true, result: 'exit 1', text: 'exit 1' }
+      if (e.tool === 'Bash') return failedRun(outer, e)
       return { result: { filePath: '/proj/src/Toggle.tsx', structuredPatch: [], originalFile: '' } }
     })
     await start($)
@@ -787,9 +788,10 @@ describe('agents', () => {
     on('agent.spawn', (_, e) => ({ model: 'm', agentId: e.description === 'review diff' ? 'a1' : 'w7' }))
     await start($)
     await $.agent.spawn({ ...SPAWN, description: 'review diff' })
-    await $.agent.spawn({ ...SPAWN, description: 'scan routes' })
-    await $.turn.start({ text: '', turnId: 'a1-t', agentId: 'a1' })
-    await $.turn.start({ text: '', turnId: 'w7-t', agentId: 'w7' })
+    await $.agent.spawn({ ...SPAWN, prompt: 'scan the routes for dead ends', description: 'scan routes' })
+    // Each loop's first turn starts with its spawn's prompt.
+    await $.turn.start({ text: SPAWN.prompt, turnId: 'a1-t', agentId: 'a1' })
+    await $.turn.start({ text: 'scan the routes for dead ends', turnId: 'w7-t', agentId: 'w7' })
     await clock.advance(65_000)
     await $.turn.complete({ turnId: 'a1-t', agentId: 'a1', answer: '', durationMs: 65_000, isAborted: false, reason: 'answer' })
 
@@ -802,7 +804,7 @@ describe('agents', () => {
       expect((await ui.find({ type: 'Button', key: 'w7' }))?.text).toMatch(/^◉ scan routes +– 1:05$/)
       expect(await ui.find({ type: 'Text', text: /^läuft/ })).toBeUndefined()
       expect(await ui.find({ type: 'Text', text: '1 läuft · 1 fertig' })).toBeDefined()
-      expect(await ui.find({ type: 'Text', text: /not kept/ })).toBeUndefined()
+      expect(await ui.find({ type: 'Text', text: /not kept|dead ends/ })).toBeUndefined()
       await ui.press({ key: 'tab-live' })
       await ui.unmount()
     }
@@ -810,6 +812,38 @@ describe('agents', () => {
 })
 
 describe('observer', () => {
+  test('the permission hooks and agent.spawn pass their events on unchanged and what answered them back as it came', async ($, on) => {
+    engine(on)
+    const seen: unknown[] = []
+    const verdict = { decision: 'deny' as const, reason: 'Bash(rm:*) is denied' }
+    const decided = { decision: { behavior: 'allow' as const } }
+    const spawned = { model: 'm', agentId: 'a1' }
+    on('tool.check', (_, e) => (seen.push(e), verdict))
+    on('classic.PermissionRequest', (_, e) => (seen.push(e), decided))
+    on('classic.PermissionDenied', (_, e) => (seen.push(e), {}))
+    on('agent.spawn', (_, e) => (seen.push(e), spawned))
+    await start($)
+    const check = { tool: 'Bash', input: { command: 'rm -rf /' }, tool_use_id: 'tu-1' }
+    const request = { tool_name: 'Bash', tool_input: { command: 'ls' } }
+    const denied = { tool_name: 'Bash', tool_input: { command: 'rm x' }, tool_use_id: 'tu-3', reason: 'auto mode' }
+    const spawn = { ...SPAWN, description: 'look around' }
+    expect(await $.tool.check(check as never)).toEqual(verdict)
+    expect(await $.classic.PermissionRequest(request)).toEqual(decided)
+    expect(await $.classic.PermissionDenied(denied)).toEqual({})
+    expect(await $.agent.spawn(spawn)).toEqual(spawned)
+    for (const [i, sent] of [check, request, denied, spawn].entries()) expect(seen[i]).toMatchObject(sent)
+  })
+
+  test('a PreToolUse hook beneath hears the call as it came', async ($, on) => {
+    engine(on)
+    const seen: unknown[] = []
+    on('classic.PreToolUse', (_, e) => (seen.push(e), {}))
+    on('tool.call', () => ({ result: { stdout: '', stderr: '', interrupted: false } }))
+    await start($)
+    await $.tool.call({ tool: 'Bash', command: 'curl -sSL https://example.com/data.json', tool_use_id: 'tu-2' })
+    expect(seen).toEqual([{ tool: 'Bash', command: 'curl -sSL https://example.com/data.json', tool_use_id: 'tu-2' }])
+  })
+
   test('tool calls and compactions pass through unchanged, results come back as answered', async ($, on) => {
     engine(on)
     const seen: unknown[] = []
@@ -1553,11 +1587,12 @@ describe('mascot Nox at work', () => {
     expect([...(await posesOver($, clock, 3000))].sort()).toEqual(['think1', 'think2', 'think3'])
   })
 
-  test('a subagent starts: it waves, briefly', async ($, on) => {
+  test('a subagent starts: it waves, briefly, as its first turn begins', async ($, on) => {
     const clock = engine(on)
     on('agent.spawn', () => ({ model: 'm', agentId: 'a1' }))
     await working($)
     await $.agent.spawn({ ...SPAWN, description: 'look around' })
+    await $.turn.start({ text: SPAWN.prompt, turnId: 'a1-t', agentId: 'a1' })
     const waving = await posesOver($, clock, WAVE_MS - FRAME_MS)
     expect([...waving].sort()).toEqual(['wave1', 'wave2'])
     await clock.advance(FRAME_MS)
@@ -1589,13 +1624,21 @@ describe('mascot Nox on events', () => {
     expect(framesIn(await posesOver($, clock, 1500))).not.toContain('question')
   })
 
-  test('a question a settings hook answered opens no dialog: no ?', async ($, on) => {
+  test('a question a settings hook answered: its answer passes unread, so the ? stands until its call ends', async ($, on) => {
     const clock = engine(on)
+    const outer = $
+    let asking = new Set<string>()
     on('classic.PermissionRequest', () => ({ decision: { behavior: 'allow' } }))
+    on('tool.call', async () => {
+      await outer.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'ls' } })
+      asking = await posesOver(outer, clock, 1500)
+      return BASH_OK
+    })
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
-    await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'ls' } })
-    expect([...(await posesOver($, clock, 1500))].sort()).toEqual(['think1', 'think2', 'think3'])
+    await $.tool.call({ tool: 'Bash', command: 'ls' })
+    expect([...asking].sort()).toEqual(['question', 'questionLow'])
+    expect(framesIn(await posesOver($, clock, 1500))).not.toContain('question')
   })
 
   test('AskUserQuestion puts the question to the person: the ? shows while it waits', async ($, on) => {
@@ -1624,7 +1667,7 @@ describe('mascot Nox on events', () => {
 
   test('a tool fails: it jolts up with a drop of sweat, lands, and goes back to work', async ($, on) => {
     const clock = engine(on)
-    on('tool.call', () => ({ isError: true, result: 'exit 1', text: 'exit 1' }))
+    on('tool.call', (_, e) => failedRun($, e))
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     await $.tool.call({ tool: 'Bash', command: 'false' })
@@ -1713,7 +1756,6 @@ describe('mascot Nox on events', () => {
     const clock = engine(on)
     const outer = $
     on('classic.PermissionRequest', () => ({}))
-    on('classic.PostToolUseFailure', () => ({}))
     on('tool.call', async (_, e) => {
       const command = (e as { command?: string }).command ?? ''
       await outer.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command } })
@@ -1741,7 +1783,12 @@ describe('mascot Nox on events', () => {
       (e.input as { command?: string }).command === 'rm -rf build' ? { decision: 'deny', reason: 'Bash(rm:*) is denied' } : { decision: 'allow' },
     )
     on('classic.PreToolUse', (_, e) => ((e as { command?: string }).command === 'curl evil' ? { deny: 'blocked by policy' } : {}))
-    on('tool.call', () => ({ isError: true, result: 'exit 1', text: 'exit 1' }))
+    // Refused at the check, a call comes back errored with its tool never run (no
+    // PostToolUseFailure); a tool that ran and failed has one.
+    on('tool.call', (_, e) => {
+      const command = (e as { command?: string }).command
+      return command === 'rm -rf build' || command === 'curl evil' ? { isError: true, result: 'denied', text: 'denied' } : failedRun($, e)
+    })
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     const ruled = await $.tool.call({ tool: 'Bash', command: 'rm -rf build', tool_use_id: 'tu-rule' })
@@ -2154,6 +2201,16 @@ const ANSWERED = { answer: '', isAborted: false, reason: 'answer' } as const
 const FAILED = { isError: true, result: 'exit 1', text: 'exit 1' } as const
 const BASH_OK = { result: { stdout: '', stderr: '', interrupted: false } } as const
 
+/**
+ * Answers a call as a tool that ran and failed, as the engine reports one:
+ * its PostToolUseFailure first (a call refused before its tool ran has
+ * none), then the errored result.
+ */
+async function failedRun($: Engine, e: { tool: string; tool_use_id?: string }) {
+  await $.classic.PostToolUseFailure({ tool_name: e.tool, tool_input: {}, tool_use_id: e.tool_use_id ?? '', error: 'exit 1' })
+  return FAILED
+}
+
 /** The cards from top to bottom, by their titles (a one-line card counts by its title). */
 async function cardTitles(ui: { findAll: (q: { type: string }) => Promise<Found[]> }): Promise<string[]> {
   return (await ui.findAll({ type: 'Text' })).map(found => found.text.trim()).filter(text => /^(PLAN|RADAR|CONTEXT|STATUS)$/.test(text))
@@ -2274,7 +2331,7 @@ describe('the Live tab', () => {
 describe('the Live tab when the pane is short', () => {
   test('Nox goes first, STATUS keeps its lines; then RADAR loses its last rows; the loop warning stays on top', async ($, on) => {
     engine(on)
-    on('tool.call', (_, e) => (e.tool === 'Bash' ? FAILED : READ_RESULT))
+    on('tool.call', (_, e) => (e.tool === 'Bash' ? failedRun($, e) : READ_RESULT))
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     await $.tool.call({ tool: 'Read', file_path: '/proj/src/a.ts' })
@@ -2322,7 +2379,7 @@ describe('the Live tab when the pane is short', () => {
 describe('RADAR', () => {
   test('the same call failing three times in a row: a warning in the accent, at the top of STATUS and of RADAR', async ($, on) => {
     engine(on)
-    on('tool.call', (_, e) => (e.tool === 'Bash' && e.command.includes('just') ? FAILED : READ_RESULT))
+    on('tool.call', (_, e) => (e.tool === 'Bash' && e.command.includes('just') ? failedRun($, e) : READ_RESULT))
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     const run = (command = 'just test --all') => $.tool.call({ tool: 'Bash', command, description: 'Run the tests' })
@@ -2372,7 +2429,7 @@ describe('RADAR', () => {
   test('the loose stage: a call that failed four times in one turn, whatever came between, dim in RADAR only', async ($, on) => {
     engine(on)
     on('tool.call', (_, e) => {
-      if (e.tool === 'Bash') return FAILED
+      if (e.tool === 'Bash') return failedRun($, e)
       return { result: { filePath: (e as { file_path?: string }).file_path ?? '', structuredPatch: [], originalFile: 'x' } }
     })
     await start($)
@@ -2409,7 +2466,7 @@ describe('RADAR', () => {
 
   test('both stages for one call: in a row the warning only; once a success breaks the row, the dim count', async ($, on) => {
     engine(on)
-    on('tool.call', (_, e) => (e.tool === 'Bash' || e.tool === 'Edit' ? FAILED : READ_RESULT))
+    on('tool.call', (_, e) => (e.tool === 'Bash' || e.tool === 'Edit' ? failedRun($, e) : READ_RESULT))
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     for (let i = 0; i < 4; i += 1) await $.tool.call({ tool: 'Bash', command: 'just test' })
@@ -2453,7 +2510,7 @@ describe('RADAR', () => {
   test('a refusal, an interrupt or a deny is no failure: it neither counts nor carries a run on', async ($, on) => {
     engine(on)
     on('tool.check', (_, e) => (e.tool === 'Bash' && (e.input as { command?: string }).command === 'rm -rf /' ? { decision: 'deny' as const, reason: 'rule' } : { decision: 'allow' as const }))
-    on('tool.call', () => FAILED)
+    on('tool.call', (_, e) => failedRun($, e))
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     await $.tool.call({ tool: 'Bash', command: 'just test', description: 'Run the tests' })
@@ -2467,7 +2524,7 @@ describe('RADAR', () => {
 
   test('failures since load: how many, and the last one\'s tool and how long ago; a subagent\'s are its own', async ($, on) => {
     const clock = engine(on)
-    on('tool.call', () => FAILED)
+    on('tool.call', (_, e) => failedRun($, e))
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     await $.tool.call({ tool: 'Read', file_path: '/proj/a.ts' })
@@ -2486,7 +2543,7 @@ describe('RADAR', () => {
   test('hotspots: the three files read or edited most, by name and count; subagents too, failures and engine forks not', async ($, on) => {
     engine(on, { agents: [{ id: 'agent-1', description: 'look around', type: 'Explore', status: 'running' }] })
     on('tool.call', (_, e) => {
-      if (e.tool === 'Read' && e.file_path.endsWith('missing.ts')) return FAILED
+      if (e.tool === 'Read' && e.file_path.endsWith('missing.ts')) return failedRun($, e)
       if (e.tool === 'Edit') return { result: { filePath: e.file_path, structuredPatch: [], originalFile: 'x' } }
       return READ_RESULT
     })
@@ -2558,11 +2615,10 @@ describe('RADAR', () => {
     expect(await row()).toBe('Wartezeit ≈2:00 · 3 Freigaben')
   })
 
-  test('the wait: an interrupted approved call is approximate too; a dialog a hook decided is no approval of yours', async ($, on) => {
+  test('the wait: an interrupted approved call is approximate too; a dialog a hook decided counts as one, its wait about none (its answer passes unread)', async ($, on) => {
     const clock = engine(on)
     const outer = $
     on('classic.PermissionRequest', (_, e) => (e.tool_input as { command?: string }).command === 'auto' ? { decision: { behavior: 'allow' as const } } : {})
-    on('classic.PostToolUseFailure', () => ({}))
     on('tool.call', async (_, e) => {
       const command = e.tool === 'Bash' ? e.command : ''
       await outer.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command } })
@@ -2575,14 +2631,14 @@ describe('RADAR', () => {
     await $.turn.start({ text: '', turnId: 't1' })
     const row = async () => (await textsAt($)).find(found => /^Wartezeit /.test(found.text))?.text
     await $.tool.call({ tool: 'Bash', command: 'auto' })
-    expect(await row()).toBeUndefined()
+    expect(await row()).toBe('Wartezeit ≈0:00 · 1 Freigabe')
     await $.tool.call({ tool: 'Bash', command: 'npm run dev', tool_use_id: 'tu-dev' })
-    expect(await row()).toBe('Wartezeit ≈1:10 · 1 Freigabe')
+    expect(await row()).toBe('Wartezeit ≈1:10 · 2 Freigaben')
   })
 
   test('RADAR in English', { options: { language: 'en' } }, async ($, on) => {
     engine(on)
-    on('tool.call', () => FAILED)
+    on('tool.call', (_, e) => failedRun($, e))
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     for (let i = 0; i < 3; i += 1) await $.tool.call({ tool: 'Bash', command: 'just test' })
@@ -2630,7 +2686,7 @@ describe('RADAR', () => {
       return next(e)
     })
     const SECRET = FAKE.anthropicLong
-    on('tool.call', (_, e) => (e.tool === 'Bash' ? FAILED : READ_RESULT))
+    on('tool.call', (_, e) => (e.tool === 'Bash' ? failedRun($, e) : READ_RESULT))
     on('agent.spawn', () => ({ model: 'm', agentId: 'a1' }))
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
@@ -2639,6 +2695,7 @@ describe('RADAR', () => {
       await $.tool.call({ tool: 'Bash', command: `ANTHROPIC_API_KEY=${SECRET} just deploy /proj/very/private`, description: `Deploy with ${SECRET}` })
     }
     await $.agent.spawn({ ...SPAWN, description: `deploy with ${SECRET}` })
+    await $.turn.start({ text: SPAWN.prompt, turnId: 'a1-t', agentId: 'a1' })
     for (const surface of SURFACES) {
       const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns: 90 }, surface })
       const texts = await ui.findAll({ type: 'Text' })
@@ -2678,7 +2735,7 @@ describe('RADAR', () => {
         narrow = await textsAt(outer, 80, 24)
         return BASH_OK
       }
-      return FAILED
+      return failedRun(outer, e)
     })
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
@@ -2796,7 +2853,7 @@ describe('secrets never reach the pane', () => {
     'git log -p -1',
     'curl -w "%{http_code}" https://example.com:8080/a',
     'git clone git@github.com:acme/app.git',
-    'curl -sSL https://example.com/install.sh | sh',
+    'curl -sSL https://example.com/data.json | jq .version',
     'curl -X POST -H "Content-Type: application/json" -d \'{"a":1}\' https://x',
     'curl -u admin https://x',
     'sort -u names.txt',
@@ -3020,7 +3077,7 @@ describe('Mini-Nox: the small owl where the pane is short', () => {
 
   test('a failed call: it jumps, eyes wide, with a drop of sweat, then walks on', async ($, on) => {
     const clock = engine(on)
-    on('tool.call', () => FAILED)
+    on('tool.call', (_, e) => failedRun($, e))
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     await $.tool.call({ tool: 'Bash', command: 'false' })
@@ -3394,33 +3451,65 @@ describe('Agents: tokens, model and activity per agent', () => {
     }
   })
 
-  test('a step heard before its spawn\'s answer counts for that agent; an id only steps carry is Sonstiges', async ($, on) => {
+  test('a workflow agent\'s steps count for it however late its spawn answers; an id only steps carry is Sonstiges', async ($, on) => {
     const world = { agents: [] as AgentInfo[] }
     const clock = engine(on, world)
-    on('agent.spawn', () => ({ model: 'm', agentId: 'wf-2' }))
+    // The spawn answers only after the agent's first turn and step: noxdeck never reads the answer.
+    let answer!: () => void
+    const answered = new Promise<void>(resolve => {
+      answer = resolve
+    })
+    on('agent.spawn', async () => {
+      await answered
+      return { model: 'm', agentId: 'wf-2' }
+    })
     modelBeneath(on, e => (e.agentId === 'wf-2' ? usageOf(5 * K, 5 * K, 10 * K, 0) : usageOf(1 * K, 0, 2 * K, 0)))
     await start($)
-    // The agent's first step and turn come in before agent.spawn has answered its id.
-    await $.turn.start({ text: '', turnId: 'w', agentId: 'wf-2' })
+    const spawned = $.agent.spawn({ ...SPAWN, prompt: 'check a.ts against the spec', description: 'gegen: a.ts', subagentType: 'workflow-subagent' })
+    await clock.advance(0)
+    // Its loop's first turn starts with the spawn's prompt: that names the agent.
+    await $.turn.start({ text: 'check a.ts against the spec', turnId: 'w', agentId: 'wf-2' })
     await step($, 'wf-2')
     await step($, 'compaction-1')
     await clock.advance(1000)
     let ui = await agentsTab($, 'terminal')
-    expect(has(await ui.findAll({ type: 'Text' }), /^▸ Verarbeitet seit Laden · Haupt-Chat 0 · Agents 0 · Sonstiges 23k$/)).toBe(true)
+    expect(has(await ui.findAll({ type: 'Text' }), /^▸ Verarbeitet seit Laden · Haupt-Chat 0 · Agents 20k · Sonstiges 3k$/)).toBe(true)
     await ui.unmount()
 
-    await $.agent.spawn({ ...SPAWN, description: 'gegen: a.ts', subagentType: 'workflow-subagent' })
+    answer()
+    await spawned
     await step($, 'wf-2', { index: 1 })
     await clock.advance(1000)
     ui = await agentsTab($, 'terminal')
     const texts = await ui.findAll({ type: 'Text' })
-    // Both of its steps are the Agents pot's now; the id no spawn and no list named stays Sonstiges.
+    // Both of its steps are the Agents pot's; the id no spawn and no list named stays Sonstiges.
     expect(has(texts, /^▸ Verarbeitet seit Laden · Haupt-Chat 0 · Agents 40k · Sonstiges 3k$/)).toBe(true)
     expect(has(texts, /^ {2}opus · high · 2 Schritte$/)).toBe(true)
     expect(has(texts, /^ {2}Kontext 15k · verarbeitet 40k · davon neu 20k$/)).toBe(true)
-    // Its start was heard before the spawn's answer too: the timeline has it.
+    // Its start was heard before the spawn's answer: the timeline has it.
     expect(has(texts, /^Zeitleiste seit Laden$/)).toBe(true)
     expect(has(texts, /compaction/)).toBe(false)
+    await ui.unmount()
+  })
+
+  test('workflow agents started out of order: each takes the spawn whose prompt its first turn starts with', async ($, on) => {
+    const clock = engine(on)
+    // The id the spawn answers is never read.
+    on('agent.spawn', () => ({ model: 'm', agentId: 'unread' }))
+    modelBeneath(on, e => (e.agentId === 'wf-b' ? usageOf(0, 0, 20 * K, 0) : usageOf(0, 0, 10 * K, 0)))
+    await start($)
+    await $.agent.spawn({ ...SPAWN, prompt: 'check a.ts', description: 'prüfen: a.ts', subagentType: 'workflow-subagent' })
+    await $.agent.spawn({ ...SPAWN, prompt: 'check b.ts', description: 'prüfen: b.ts', subagentType: 'workflow-subagent' })
+    await $.turn.start({ text: 'check b.ts', turnId: 'b', agentId: 'wf-b' })
+    await $.turn.start({ text: 'check a.ts', turnId: 'a', agentId: 'wf-a' })
+    await step($, 'wf-a')
+    await step($, 'wf-b')
+    await clock.advance(1000)
+    const ui = await agentsTab($, 'terminal')
+    const rows = await rowsOf(ui)
+    expect(rows['wf-a']).toMatch(/^ {2}◉ a\.ts +10k /)
+    expect(rows['wf-b']).toMatch(/^ {2}◉ b\.ts +20k /)
+    expect(rows.unread).toBeUndefined()
     await ui.unmount()
   })
 
@@ -3565,7 +3654,7 @@ describe('Agents: tokens, model and activity per agent', () => {
         done('ok', 'prüfen: c'),
       ],
     })
-    on('tool.call', () => FAILED)
+    on('tool.call', (_, e) => failedRun($, e))
     await start($)
     await $.tool.call({ tool: 'Bash', command: 'npm test', agentId: 'f1' })
     await $.tool.call({ tool: 'Bash', command: 'npm test', agentId: 'f1' })
@@ -3850,7 +3939,9 @@ describe('Agents: tokens, model and activity per agent', () => {
    * every toast raised, the engine answering each view as `answer` says.
    */
   async function workflowWorld($: Engine, on: On, answer: UiViewResult = {}) {
-    const clock = engine(on)
+    // The agent list names the Agent tool's subagent once it is spawned, never a workflow's.
+    const world = { agents: [] as AgentInfo[] }
+    const clock = engine(on, world)
     const ids: Readonly<Record<string, string>> = { 'prüfen: model.ts': 'wf-1', 'prüfen: view.tsx': 'wf-2', 'review diff': 'g-1' }
     on('agent.spawn', (_, e) => ({ model: 'm', agentId: ids[e.description] ?? 'unknown' }))
     const views: SiteView[] = []
@@ -3867,6 +3958,7 @@ describe('Agents: tokens, model and activity per agent', () => {
     await $.agent.spawn({ ...SPAWN, description: 'prüfen: model.ts', subagentType: 'workflow-subagent' })
     await $.agent.spawn({ ...SPAWN, description: 'prüfen: view.tsx', subagentType: 'workflow-subagent' })
     await $.agent.spawn({ ...SPAWN, description: 'review diff', subagentType: 'general-purpose' })
+    world.agents = [{ id: 'g-1', description: 'review diff', type: 'general-purpose', status: 'running' }]
     await $.turn.start({ text: '', turnId: 'w', agentId: 'wf-1' })
     await $.turn.start({ text: '', turnId: 'w2', agentId: 'wf-2' })
     await $.turn.complete({ turnId: 'w2', agentId: 'wf-2', durationMs: 1000, ...ANSWERED })
@@ -6144,7 +6236,7 @@ describe('fine Nox in the pane', () => {
       const outer = $
       on('tool.call', async (_, e) => {
         await clock.advance(3000)
-        return e.tool === 'Bash' ? { isError: true, result: 'exit 1', text: 'exit 1' } : READ_RESULT
+        return e.tool === 'Bash' ? failedRun(outer, e) : READ_RESULT
       })
       await startWithPictures($, clock)
       const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -6210,7 +6302,7 @@ describe('fine Nox in the pane', () => {
 
   test('a failure: fehler; a failure in a loop: the loop warning, the picture in the pane', { options: FEIN }, async ($, on) => {
     const clock = engine(on, PICTURES)
-    on('tool.call', () => ({ isError: true, result: 'exit 1', text: 'exit 1' }))
+    on('tool.call', (_, e) => failedRun($, e))
     await startWithPictures($, clock)
     await $.turn.start({ text: '', turnId: 't1' })
     await $.tool.call({ tool: 'Bash', command: 'npm test', description: 'Run the tests' })

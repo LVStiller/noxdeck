@@ -40,7 +40,7 @@ export const filePathOf = (tool: string, input: Loose): string | null =>
   FILE_TOOLS.has(tool) ? (text(input, tool === 'NotebookEdit' ? 'notebook_path' : 'file_path') ?? null) : null
 
 /** FNV-1a over the text, as eight hex digits: a call's target told apart without keeping it. */
-function hashOf(value: string): string {
+export function hashOf(value: string): string {
   let hash = 0x811c9dc5
   for (let i = 0; i < value.length; i += 1) {
     hash ^= value.charCodeAt(i)
