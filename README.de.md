@@ -138,7 +138,7 @@ Alle Texte des Panes stehen in [`hooks/strings.ts`](hooks/strings.ts), auf Engli
 
 ## Hinweis
 
-noxdeck steht in keiner Verbindung zu Anthropic. Es ist ein Hobbyprojekt, ohne Gewährleistung und ohne Support-Versprechen. Siehe [LICENSE](LICENSE) (MIT). Sicherheitslücken: siehe [SECURITY.md](SECURITY.md).
+noxdeck steht in keiner Verbindung zu Anthropic. Es ist ein Hobbyprojekt, ohne Gewährleistung und ohne Support-Versprechen. Siehe [LICENSE](LICENSE) (MIT). Sicherheitslücken: siehe [SECURITY.md](SECURITY.md). Datenschutz: siehe [PRIVACY.md](PRIVACY.md).
 
 ## Autor
 

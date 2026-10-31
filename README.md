@@ -138,7 +138,7 @@ All texts of the pane live in [`hooks/strings.ts`](hooks/strings.ts), in English
 
 ## Disclaimer
 
-noxdeck is not affiliated with Anthropic. It is a hobby project, with no warranty and no support promise. See [LICENSE](LICENSE) (MIT). Security issues: see [SECURITY.md](SECURITY.md).
+noxdeck is not affiliated with Anthropic. It is a hobby project, with no warranty and no support promise. See [LICENSE](LICENSE) (MIT). Security issues: see [SECURITY.md](SECURITY.md). Privacy: see [PRIVACY.md](PRIVACY.md).
 
 ## Author
 
