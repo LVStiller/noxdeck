@@ -16,7 +16,7 @@ export type Theme = {
   done: Color
   bad: Color
   frame: Color
-  /** The 5h limit bar's empty cells and the history's placeholder dots. */
+  /** The limit bar's empty cells and the history's placeholder dots. */
   track: Color
   /** The context bar's free capacity: a quiet dark grey under full cells. */
   free: Color
@@ -32,10 +32,10 @@ export type Theme = {
    * glyph, dim. Whole cells only.
    */
   agentBar: { cell: string }
-  /** The 5h limit as a small bar: `cells` cells of `cell`, full ones in `heart`, the rest in `track`. */
+  /** The limit as a small bar: `cells` cells of `cell`, full ones in `heart`, the rest in `track`. */
   limitBar: { cell: string; cells: number }
   /**
-   * The 5h limit as five hearts: full ones in `heart`, empty ones in `emptyColor`.
+   * The limit as five hearts: full ones in `heart`, empty ones in `emptyColor`.
    * Each is followed by a space: a terminal may draw the glyph wider than its
    * one cell, and the space takes the overflow instead of the next heart.
    */

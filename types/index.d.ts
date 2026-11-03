@@ -77,7 +77,14 @@ export type UsageTrack = {
   inputTotal: number
 }
 
-export type RateWindow = { percentUsed: number; resetsAt: string | null }
+/**
+ * Which rate-limit window STATUS shows (version 1.0.7): the 5h one where the
+ * account has it, else the week's for all models (an account without a 5h
+ * limit, such as Ultra).
+ */
+export type LimitKind = 'five_hour' | 'seven_day'
+
+export type RateWindow = { kind: LimitKind; percentUsed: number; resetsAt: string | null }
 
 export type Activity = {
   isWorking: boolean
@@ -162,7 +169,7 @@ export type Pose = {
   frame: MascotFrame
   /** Breathing in: the body one pixel higher, the feet where they stand. */
   isInhaling: boolean
-  /** Heavy lids over open eyes: the 5h limit runs low. */
+  /** Heavy lids over open eyes: the limit STATUS shows runs low. */
   isDrowsy: boolean
   /**
    * The sweat drop beside the head (context over 80 % of the auto-compact
@@ -406,7 +413,8 @@ declare module 'claude-code' {
       plan: Shaped<PlanStep[]>
       context: Shaped<ContextSnapshot | null>
       usage: Shaped<UsageTrack>
-      fiveHour: Shaped<RateWindow | null>
+      /** The window STATUS shows and Nox tires by: the 5h one, else the week's; null without either. */
+      limit: Shaped<RateWindow | null>
       activity: Shaped<Activity>
       changes: Shaped<FileChange[]>
       /** Files a Bash diff named no path for, or past the list's cap: counted, not listed. */
@@ -451,6 +459,8 @@ declare module 'claude-code' {
       /** Retired (version 0.7 drew its JETZT card from them): named once, read and never written. */
       turn: unknown
       pace: unknown
+      /** Retired (up to 1.0.6 the 5h window alone, now `limit`): named once, read and never written. */
+      fiveHour: unknown
       /**
        * Retired (version 0.1 read it while drawing). Still named once, read
        * and never written: during a reload the old version's render may still

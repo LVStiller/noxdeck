@@ -5,6 +5,7 @@
 // Hit, Auto-Compact, Compact, Turn, Hotspots, deferred) stay English in every
 // locale; sentences and states are translated.
 
+import type { LimitKind } from '../types'
 import type { Mood } from './mascot'
 import type { SourceKey } from './themes'
 
@@ -87,12 +88,14 @@ export type Strings = {
     editing: (file: string) => string
     lastEdit: (file: string) => string
     noEdits: string
-    limit: (left: string) => string
-    limitNA: string
+    /** The share left of the window shown: the 5h one, else the week's for all models. */
+    limit: Record<LimitKind, (left: string) => string>
     /** The window's reset time has passed since the last reading. */
-    limitReset: string
-    /** When the window resets, as a clock time. */
+    limitReset: Record<LimitKind, string>
+    /** When the window resets: a clock time, the week's with its weekday before it. */
     resetAt: (time: string) => string
+    /** The weekdays the week's reset names, Sunday first as `Date#getDay` counts. */
+    weekdays: readonly string[]
     mood: Record<Exclude<Mood, 'agents'>, string>
     /** The state in STATUS's title beside the mini owl: the caption's words, `arbeitet` without its dots. */
     moodTitle: Record<Exclude<Mood, 'agents'>, string>
@@ -244,10 +247,13 @@ const de: Strings = {
     editing: file => `✎ bearbeitet ${file}`,
     lastEdit: file => `zuletzt: ${file}`,
     noEdits: '✎ noch keine Änderungen',
-    limit: left => `5h-Limit · ${left} übrig`,
-    limitNA: '5h-Limit · n/a',
-    limitReset: '5h-Limit · zurückgesetzt',
+    limit: {
+      five_hour: left => `5h-Limit · ${left} übrig`,
+      seven_day: left => `Woche · ${left} übrig`,
+    },
+    limitReset: { five_hour: '5h-Limit · zurückgesetzt', seven_day: 'Woche · zurückgesetzt' },
     resetAt: time => `Reset ${time}`,
+    weekdays: ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'],
     mood: {
       working: 'arbeitet …',
       ready: 'bereit',
@@ -396,10 +402,13 @@ const en: Strings = {
     editing: file => `✎ Editing ${file}`,
     lastEdit: file => `last: ${file}`,
     noEdits: '✎ no edits yet',
-    limit: left => `5h limit · ${left} left`,
-    limitNA: '5h limit · n/a',
-    limitReset: '5h limit · reset',
+    limit: {
+      five_hour: left => `5h limit · ${left} left`,
+      seven_day: left => `week · ${left} left`,
+    },
+    limitReset: { five_hour: '5h limit · reset', seven_day: 'week · reset' },
     resetAt: time => `Reset ${time}`,
+    weekdays: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
     mood: {
       working: 'working …',
       ready: 'ready',

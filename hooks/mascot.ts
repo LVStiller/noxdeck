@@ -31,7 +31,7 @@ export type Scene = {
   restingSince: number
   /** The context is more than 80 % of the way to the auto-compact threshold (of the window with auto-compaction off). */
   isHot: boolean
-  /** Less than 20 % of the 5h limit is left. */
+  /** Less than 20 % of the limit STATUS shows is left: the 5h window, else the week's. */
   isTired: boolean
   /** RADAR warns of a loop: the same call failed three times in a row (its last failure startled the owl). */
   isLooping: boolean
@@ -418,8 +418,9 @@ export const SLEEP_AFTER_MS = YAWN_AFTER_MS + 3000
 
 /**
  * Context fill above which the owl sweats (a share of the auto-compact
- * threshold, of the window with auto-compaction off), and 5h limit left
- * below which it is tired.
+ * threshold, of the window with auto-compaction off), and the share left of
+ * the limit STATUS shows (the 5h window, else the week's) below which it is
+ * tired.
  */
 export const HOT_PERCENT = 80
 export const TIRED_PERCENT = 20
@@ -739,12 +740,12 @@ export function sceneOf(
   cues: Cues,
   agents: readonly AgentRow[],
   context: ContextSnapshot | null,
-  fiveHour: RateWindow | null,
+  limit: RateWindow | null,
   at: number,
   radar: Radar = NO_RADAR,
 ): Scene {
   const fill = context === null ? null : thresholdPercent(context)
-  const left = limitLeft(fiveHour, at)
+  const left = limitLeft(limit, at)
   return {
     isWorking: activity.isWorking,
     isBusy: agents.some(isAgentLive),

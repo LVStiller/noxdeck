@@ -301,10 +301,10 @@ const WITH_TODO: World = { tools: ['TodoWrite'] }
 
 type Found = { text: string; props: Record<string, unknown> }
 
-/** Nox's caption: the state the STATUS card names after its 5h line (JETZT may say the same above it). */
+/** Nox's caption: the state the STATUS card names after its limit line (5h, the week's, or none). */
 async function captionOf(ui: { findAll: (q: { type: string }) => Promise<Found[]> }): Promise<Found | undefined> {
   const texts = await ui.findAll({ type: 'Text' })
-  const limit = texts.findLastIndex(found => /^ ?5h[- ]limit · /i.test(found.text))
+  const limit = texts.findLastIndex(found => LIMIT_LINE.test(found.text))
   return texts.slice(limit + 1).find(found => MOOD.test(found.text) || MOOD_EN.test(found.text))
 }
 
@@ -332,8 +332,14 @@ const FAKE = {
   githubHeader: '0123' + 'abcd',
 }
 
-/** The bar style of the 5h limit; hearts are the default. */
+/** The bar style of the limit; hearts are the default. */
 const BAR = { options: { limitStyle: 'bar' } } as const
+
+/** STATUS's limit line in either language: the 5h window's or the week's, its text alone or after the cells. */
+const LIMIT_LINE = /^(?:[♥♡▊ ]*)?(?:5h[- ]limit|woche|week) · /i
+
+/** A 5h reading without its reset time: STATUS has two lines, the edit line and the limit. */
+const TWO_LINES: World = { rateLimits: [{ kind: 'five_hour', percentUsed: 30 }] }
 
 /** The 5h limit bar's cells: the full ones in the accent, the empty ones in the track color. */
 async function limitCells(ui: { findAll: (q: { type: string; text: RegExp }) => Promise<{ text: string; props: Record<string, unknown> }[]> }) {
@@ -512,7 +518,7 @@ describe('context', () => {
     for (const surface of SURFACES) {
       const ui = await $.ui.mount({ ...PANE, surface })
       expect(await ui.find({ type: 'Text', text: 'Context noch nicht gemessen' })).toBeDefined()
-      expect(await ui.find({ type: 'Text', text: '5h-Limit · n/a' })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: LIMIT_LINE })).toBeUndefined()
       expect(await ui.find({ type: 'Text', text: 'RADAR · keine Auffälligkeiten' })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: 'kein Plan aktiv' })).toBeUndefined()
       expect(await ui.find({ type: 'Text', text: '✎ noch keine Änderungen' })).toBeDefined()
@@ -1000,7 +1006,7 @@ describe('edge cases', () => {
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
     expect((await captionOf(ui))?.text).toBe('ready')
     expect(await ui.find({ type: 'Text', text: 'RADAR · nothing to note' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: '5h limit · n/a' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: LIMIT_LINE })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: ' Live ' })).toBeDefined()
     await ui.unmount()
   })
@@ -1303,6 +1309,7 @@ describe('hot reload from an older version', () => {
   const READ_WHILE_DRAWING = [
     'tab', 'plan', 'context', 'usage', 'fiveHour', 'activity', 'changes', 'missedFiles', 'hiddenFiles', 'agents', 'root', 'now',
     'hasTodoTool', 'isDismissed', 'cues', 'pose', 'turn', 'pace', 'todoTools', 'agentBoard', 'agentFolds', 'isProcessedOpen',
+    'limit',
   ]
 
   test('the module still names every key an earlier version read while drawing', async ($, on) => {
@@ -1388,6 +1395,136 @@ describe('5h limit as hearts (default) or bar', () => {
     expect(await hearts(99)).toBe('♥ ♡ ♡ ♡ ♡  ')
     expect(await hearts(0)).toBe('♥ ♥ ♥ ♥ ♥  ')
   })
+})
+
+describe('the limit STATUS shows: the 5h window, else the week\'s for all models, else no line', () => {
+  // In milliseconds: HOUR and MINUTE are declared further down, after this block runs.
+  const T5 = 1_000_000 + 2 * 3_600_000
+  const T7 = 1_000_000 + 100 * 3_600_000 + 40 * 60_000
+  const FIVE: SessionRateLimit = { kind: 'five_hour', percentUsed: 30, resetsAt: new Date(T5).toISOString() }
+  // 17 % of the week used: 83 % left, four of five hearts, eight of ten cells.
+  const WEEK: SessionRateLimit = { kind: 'seven_day', percentUsed: 17, resetsAt: new Date(T7).toISOString() }
+  /** A Claude gateway's spend limit: never shown, as before. */
+  const SPEND: SessionRateLimit = { kind: 'spend_limit', percentUsed: 40 }
+  const clockOf = (at: number) => {
+    const time = new Date(at)
+    return `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`
+  }
+  /** Each language's words, written out here rather than read from the locale. */
+  const WORDS = {
+    de: {
+      percent: P,
+      five: (left: string) => `5h-Limit · ${left} übrig`,
+      week: (left: string) => `Woche · ${left} übrig`,
+      weekReset: 'Woche · zurückgesetzt',
+      weekdays: ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'],
+    },
+    en: {
+      percent: (n: number) => `${n}%`,
+      five: (left: string) => `5h limit · ${left} left`,
+      week: (left: string) => `week · ${left} left`,
+      weekReset: 'week · reset',
+      weekdays: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+    },
+  } as const
+
+  /** STATUS's limit line (the whole row, cells and words) and the reset line under it; null for one not drawn. */
+  async function limitRows(ui: { findAll: (q: { type: string }) => Promise<Found[]> }) {
+    const texts = await ui.findAll({ type: 'Text' })
+    return {
+      limit: texts.find(found => found.props.wrap !== undefined && LIMIT_LINE.test(found.text))?.text ?? null,
+      reset: texts.find(found => /^Reset /.test(found.text))?.text ?? null,
+    }
+  }
+
+  for (const language of ['de', 'en'] as const) {
+    const words = WORDS[language]
+    const options = { language }
+
+    test(`${language}: a 5h window: the 5h line and its time of day as before, the week beside it not shown`, { options }, async ($, on) => {
+      // The week's first: the 5h window wins wherever it stands.
+      engine(on, { rateLimits: [WEEK, FIVE, SPEND] })
+      await start($)
+      for (const surface of SURFACES) {
+        const ui = await $.ui.mount({ ...PANE, surface })
+        expect({ surface, ...(await limitRows(ui)) }).toEqual({
+          surface,
+          limit: `♥ ♥ ♥ ♥ ♡  ${words.five(words.percent(70))}`,
+          reset: `Reset ${clockOf(T5)}`,
+        })
+        await ui.unmount()
+      }
+    })
+
+    test(`${language}: no 5h window: the week's with the same hearts, its reset as weekday and time`, { options }, async ($, on) => {
+      engine(on, { rateLimits: [SPEND, WEEK] })
+      await start($)
+      const reset = `Reset ${words.weekdays[new Date(T7).getDay()]} ${clockOf(T7)}`
+      for (const surface of SURFACES) {
+        const ui = await $.ui.mount({ ...PANE, surface })
+        expect({ surface, ...(await limitRows(ui)) }).toEqual({ surface, limit: `♥ ♥ ♥ ♥ ♡  ${words.week(words.percent(83))}`, reset })
+        expect((await ui.find({ type: 'Text', text: /^(♥ )+$/ }))?.props.color).toBe('claude')
+        expect((await ui.find({ type: 'Text', text: reset }))?.props.dimColor).toBe(true)
+        await ui.unmount()
+      }
+    })
+
+    test(`${language}: no 5h window, as a bar: the week's in the same ten cells`, { options: { ...options, limitStyle: 'bar' } }, async ($, on) => {
+      engine(on, { rateLimits: [WEEK] })
+      await start($)
+      const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+      expect((await limitRows(ui)).limit).toBe(`▊▊▊▊▊▊▊▊▊▊ ${words.week(words.percent(83))}`)
+      expect(await limitCells(ui)).toEqual({ full: 8, empty: 2 })
+      expect(await ui.find({ type: 'Text', text: /[♥♡]/ })).toBeUndefined()
+      await ui.unmount()
+    })
+
+    test(`${language}: the week's reading past its reset time: said so, no hearts, no reset line`, { options }, async ($, on) => {
+      const clock = engine(on, { rateLimits: [{ kind: 'seven_day', percentUsed: 97, resetsAt: new Date(1_000_500).toISOString() }] })
+      await start($)
+      await clock.advance(1000)
+      const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+      expect(await limitRows(ui)).toEqual({ limit: words.weekReset, reset: null })
+      expect(await ui.find({ type: 'Text', text: /[♥♡]/ })).toBeUndefined()
+      await ui.unmount()
+    })
+
+    test(`${language}: no window at all (none measured, a gateway's spend limit alone): no limit line, no reset, no n/a`, { options }, async ($, on) => {
+      engine(on)
+      await start($)
+      for (const rateLimits of [[], [SPEND]]) {
+        await $.session.measure({ context: { window: 200 * K }, rateLimits, changed: ['rateLimits'] })
+        for (const surface of SURFACES) {
+          const ui = await $.ui.mount({ ...PANE, surface })
+          const texts = await ui.findAll({ type: 'Text' })
+          expect({ surface, ...(await limitRows(ui)) }).toEqual({ surface, limit: null, reset: null })
+          // Neither cells nor words of a limit: the old `5h-Limit · n/a` is gone too (CONTEXT's own n/a stays).
+          expect(has(texts, /^[♥♡▊]/)).toBe(false)
+          expect(has(texts, /(5h[- ]limit|woche|week)/i)).toBe(false)
+          await ui.unmount()
+        }
+      }
+      // A row less: Nox shows from 30 rows, one fewer than with a limit line.
+      expect(owlOf(await shownPose($, 'terminal', { rows: 30, columns: 48 }))).toBe('nox')
+      expect(owlOf(await shownPose($, 'terminal', { rows: 29, columns: 48 }))).toBe('mini')
+    })
+
+    test(`${language}: each measurement picks the window anew: none, the week's, the 5h, none again`, { options }, async ($, on) => {
+      engine(on)
+      await start($)
+      const after = async (rateLimits: SessionRateLimit[]) => {
+        await $.session.measure({ context: { window: 200 * K }, rateLimits, changed: ['rateLimits'] })
+        const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+        const rows = await limitRows(ui)
+        await ui.unmount()
+        return rows.limit
+      }
+      expect(await after([])).toBeNull()
+      expect(await after([WEEK])).toBe(`♥ ♥ ♥ ♥ ♡  ${words.week(words.percent(83))}`)
+      expect(await after([WEEK, FIVE])).toBe(`♥ ♥ ♥ ♥ ♡  ${words.five(words.percent(70))}`)
+      expect(await after([SPEND])).toBeNull()
+    })
+  }
 })
 
 // ---------------------------------------------------------------- mascot
@@ -1986,6 +2123,29 @@ describe('mascot Nox states', () => {
     await start($)
     expect(framesIn(await posesOver($, clock, 12_000))).not.toContain('tired')
   })
+
+  test('no 5h window: tired by the week\'s, the limit STATUS shows', async ($, on) => {
+    const clock = engine(on, { rateLimits: [{ kind: 'seven_day', percentUsed: 85 }] })
+    await start($)
+    expect([...framesIn(await posesOver($, clock, 12_000))].sort()).toEqual(['tired', 'tiredBlink'])
+    await $.session.measure({ context: { window: 200 * K }, rateLimits: [{ kind: 'seven_day', percentUsed: 80 }], changed: ['rateLimits'] })
+    expect(framesIn(await posesOver($, clock, 12_000))).not.toContain('tired')
+  })
+
+  test('a 5h window: tired by it alone, whatever the week has left', async ($, on) => {
+    const clock = engine(on, { rateLimits: [{ kind: 'seven_day', percentUsed: 95 }, { kind: 'five_hour', percentUsed: 80 }] })
+    await start($)
+    expect(framesIn(await posesOver($, clock, 12_000))).not.toContain('tired')
+    const both = [{ kind: 'five_hour', percentUsed: 85 }, { kind: 'seven_day', percentUsed: 5 }]
+    await $.session.measure({ context: { window: 200 * K }, rateLimits: both, changed: ['rateLimits'] })
+    expect([...framesIn(await posesOver($, clock, 12_000))].sort()).toEqual(['tired', 'tiredBlink'])
+  })
+
+  test('no window at all: never tired, a gateway\'s spend limit included', async ($, on) => {
+    const clock = engine(on, { rateLimits: [{ kind: 'spend_limit', percentUsed: 99 }] })
+    await start($)
+    expect(framesIn(await posesOver($, clock, 12_000))).not.toContain('tired')
+  })
 })
 
 describe('mascot Nox: the animations option, pausing, room', () => {
@@ -2060,7 +2220,7 @@ describe('mascot Nox: the animations option, pausing, room', () => {
   })
 
   test('Nox exactly when the card fits, else the mini owl, on the terminal and off it; the caption goes with Nox', async ($, on) => {
-    engine(on)
+    engine(on, TWO_LINES)
     await start($)
     // Nox shows only while all of Live fits with it: the pane's frame (4 rows,
     // 5 off the terminal), STATUS with the owl (11, 12 with a title row),
@@ -2330,7 +2490,7 @@ describe('the Live tab', () => {
 
 describe('the Live tab when the pane is short', () => {
   test('Nox goes first, STATUS keeps its lines; then RADAR loses its last rows; the loop warning stays on top', async ($, on) => {
-    engine(on)
+    engine(on, TWO_LINES)
     on('tool.call', (_, e) => (e.tool === 'Bash' ? failedRun($, e) : READ_RESULT))
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
@@ -6162,7 +6322,7 @@ describe('fine Nox in the pane', () => {
   })
 
   test('Mini-Nox where the pane is short: one picture of 6 × 3 cells beside STATUS\'s lines, the state in the title', { options: FEIN }, async ($, on) => {
-    const clock = engine(on, PICTURES)
+    const clock = engine(on, { ...PICTURES, ...TWO_LINES })
     await startWithPictures($, clock)
     const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, scroll: { offset: 0, bodyRows: SHORT.rows } }, surface: 'terminal' })
     const mini = await ui.find({ type: 'Image', key: 'mini' })
@@ -6772,7 +6932,7 @@ describe('the languages', () => {
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
     expect((await captionOf(ui))?.text).toBe('ready')
     expect(await ui.find({ type: 'Text', text: 'RADAR · nothing to note' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: '5h limit · n/a' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: LIMIT_LINE })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: ' noxdeck ' })).toBeDefined()
     await ui.unmount()
     expect((await $.command.run({ command: 'noxdeck', args: '', ...RUN }))?.text).toBe('noxdeck opened.')
@@ -6785,7 +6945,7 @@ describe('the languages', () => {
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
     expect((await captionOf(ui))?.text).toBe('bereit')
     expect(await ui.find({ type: 'Text', text: 'RADAR · keine Auffälligkeiten' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: '5h-Limit · n/a' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: LIMIT_LINE })).toBeUndefined()
     await ui.unmount()
     expect((await $.command.run({ command: 'noxdeck', args: '', ...RUN }))?.text).toBe('noxdeck geöffnet.')
   })

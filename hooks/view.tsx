@@ -38,7 +38,6 @@ import {
   freshOf,
   groupsOf,
   growthOf,
-  hasLimitReset,
   isAgentLive,
   isGroupOpen,
   isEndedStatus,
@@ -56,7 +55,7 @@ import {
   wholeTally,
 } from './model'
 import type { AgentGroup, FoldView, LegendItem } from './model'
-import { hotspotsOf, loopOf, repeatedOf, resetClockOf, waitedOf } from './radar'
+import { hotspotsOf, loopOf, repeatedOf, resetClockOf, resetDayOf, waitedOf } from './radar'
 import { maskSecrets } from './secrets'
 import type { AgentTally, Strings } from './strings'
 import type { SourceKey, Theme } from './themes'
@@ -700,13 +699,16 @@ export function moodOf(activity: Activity, agents: readonly AgentRow[], now: num
   return 'ready'
 }
 
-/** How the 5h limit is drawn: five hearts, or the ten-cell bar (the `limitStyle` option). */
+/** How the limit is drawn: five hearts, or the ten-cell bar (the `limitStyle` option). */
 export type LimitStyle = 'hearts' | 'bar'
 
-/** What STATUS shows: the file edited, the 5h limit and its reset, the loop warning, Nox (or the mini owl) and its state. */
+/**
+ * What STATUS shows: the file edited, the limit (the 5h window, else the
+ * week's) and its reset, the loop warning, Nox (or the mini owl) and its state.
+ */
 export type StatusView = {
   activity: Activity
-  fiveHour: RateWindow | null
+  limit: RateWindow | null
   mood: Mood
   agentsAtWork: AgentsAtWork
   pose: Pose
@@ -760,7 +762,9 @@ function owlRow(ui: Ui, runs: readonly Run[]): RenderElement {
 /**
  * The STATUS card, at the top of the Live tab. While a call fails again and
  * again its warning comes first, so it never leaves the visible rows; then
- * the file edited, the 5h limit and its reset time. With Nox (`owl` nox)
+ * the file edited, the limit and its reset: the 5h window and the time of
+ * day, else the week's for all models and its weekday and time, else no
+ * line for either. With Nox (`owl` nox)
  * or none, the state follows as a caption under them, in the accent while
  * the person is waited on; the mini owl sits beside them instead, cutting
  * them sooner, and the state moves into the title. Where the view brings
@@ -770,7 +774,7 @@ function owlRow(ui: Ui, runs: readonly Run[]): RenderElement {
  */
 export function statusCard(ui: Ui, view: StatusView, owl: Owl): Drawn {
   const { Box, Text, theme, s } = ui
-  const { activity, fiveHour, mood, agentsAtWork, pose, miniPose, now, limitStyle } = view
+  const { activity, limit, mood, agentsAtWork, pose, miniPose, now, limitStyle } = view
   const Picture = ui.Image
   const pictures = Picture === null ? null : view.pictures
   const miniColumns = pictures === null ? MINI_COLUMNS : MINI_FINE_COLUMNS
@@ -796,21 +800,23 @@ export function statusCard(ui: Ui, view: StatusView, owl: Owl): Drawn {
     )
 
   // The reading is the last response's; once its window's reset time has
-  // passed it no longer stands, and the card says so instead of showing it.
-  const hasReset = hasLimitReset(fiveHour, now)
-  const left = limitLeft(fiveHour, now)
+  // passed it no longer stands (`left` null), and the card says so instead
+  // of showing it. Without a window (off a subscription, nothing measured
+  // yet) no line.
+  const left = limitLeft(limit, now)
+  const kind = limit?.kind ?? 'five_hour'
   const leftText = left !== null && left > 0 && left < 0.5 ? `<${s.percent(1)}` : s.percent(Math.round(left ?? 0))
   const hearts = theme.limitHearts
   const cells = limitStyle === 'hearts' ? 5 : theme.limitBar.cells
   const full = left === null ? 0 : cellsFull(left, cells)
   // The share left is never cut: where the sentence does not fit, the number alone follows the cells.
-  const sentence = ` ${s.status.limit(leftText)}`
+  const sentence = ` ${s.status.limit[kind](leftText)}`
   const drawnCells = limitStyle === 'hearts' ? 2 * cells : cells
   const words = drawnCells + sentence.length <= room ? sentence : ` ${leftText}`
-  const limit =
-    left === null ? (
+  const limitLine =
+    limit === null ? null : left === null ? (
       <Text dimColor wrap="truncate-end">
-        {hasReset ? s.status.limitReset : s.status.limitNA}
+        {s.status.limitReset[kind]}
       </Text>
     ) : limitStyle === 'hearts' ? (
       // A space after every heart, so a glyph drawn wider than its cell spills
@@ -827,8 +833,12 @@ export function statusCard(ui: Ui, view: StatusView, owl: Owl): Drawn {
         <Text dimColor>{words}</Text>
       </Text>
     )
-  // Under the limit, when the window resets: only while its reading stands.
-  const resetTime = left === null ? null : resetClockOf(fiveHour?.resetsAt ?? null)
+  // Under the limit, when the window resets: only while its reading stands;
+  // the week's with its weekday, as it may be days away.
+  const clockTime = left === null ? null : resetClockOf(limit?.resetsAt ?? null)
+  const day = kind === 'seven_day' ? resetDayOf(limit?.resetsAt ?? null) : null
+  const weekday = day === null ? undefined : s.status.weekdays[day]
+  const resetTime = clockTime === null || weekday === undefined ? clockTime : `${weekday} ${clockTime}`
   const reset =
     resetTime === null ? null : (
       <Text dimColor wrap="truncate-end">
@@ -836,7 +846,7 @@ export function statusCard(ui: Ui, view: StatusView, owl: Owl): Drawn {
       </Text>
     )
 
-  const lines = [editing, limit, reset].filter(line => line !== null)
+  const lines = [editing, limitLine, reset].filter(line => line !== null)
 
   if (owl === 'mini') {
     // `fertig` while it hops, then `bereit`: the caption's 30 s are Nox's.

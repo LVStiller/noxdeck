@@ -23,13 +23,13 @@ A Claude Code mod: a retro terminal dashboard in a pane beside the transcript, w
 ## What it shows
 
 - **Live** (the default tab):
-  - **STATUS**: the file Claude is editing, the 5-hour limit as five hearts or a ten-cell bar with the time it resets, and Nox with a caption (working, ready, needs your approval, asking you, error, done, agents at work).
+  - **STATUS**: the file Claude is editing, the usage limit as five hearts or a ten-cell bar with when it resets, and Nox with a caption (working, ready, needs your approval, asking you, error, done, agents at work). The limit is the 5-hour one (`5h limit · 70% left`, reset as a time of day); where the account has none, as on Ultra, the weekly limit for all models (`week · 83% left`, reset as weekday and time). Without either, as off a subscription, the line is left out.
   - **CONTEXT**: how full the context window is, by source (messages, MCP, tools, memory, skills, system), a history, growth per turn, cache hit rate and how much is left until auto-compaction.
   - **RADAR**: the same call failing again and again, failures since load, the files read or edited most (hotspots) and how long approval dialogs waited on you. While the session has a todo tool, **PLAN** shows Claude's todo list in its place.
 - **Changes**: the files changed in this session, with lines added and removed, each by its path from the project folder. Cache and build files a Bash command makes on the side (in `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `node_modules`, `.venv` or `.git`, `*.pyc`, `*.pyo`, `.DS_Store`) are counted below the list, not listed; an Edit or Write there is always listed.
 - **Agents**: what the main chat, the subagents and other loops processed since load, each subagent's model, tokens and current activity, in groups that fold, and a timeline. A press on an agent's row shows its transcript in the main view.
 
-Nox is a pixel picture where the terminal draws pictures (Ghostty, kitty; iTerm2 3.5 and later in fullscreen rendering; tmux with `allow-passthrough` and `focus-events` on) and block characters everywhere else. It reads, writes, runs the shell, thinks, waves when a subagent starts, waits for you, is glad when the turn is done, startles at a failure, warns of a loop, sweats when the context fills up, gets tired when the 5-hour limit runs low, and yawns and sleeps after two minutes without a turn. Where the pane is short, a mini owl takes its place.
+Nox is a pixel picture where the terminal draws pictures (Ghostty, kitty; iTerm2 3.5 and later in fullscreen rendering; tmux with `allow-passthrough` and `focus-events` on) and block characters everywhere else. It reads, writes, runs the shell, thinks, waves when a subagent starts, waits for you, is glad when the turn is done, startles at a failure, warns of a loop, sweats when the context fills up, gets tired when the limit STATUS shows runs low (under 20 % left), and yawns and sleeps after two minutes without a turn. Where the pane is short, a mini owl takes its place.
 
 ## Installation
 
@@ -67,12 +67,12 @@ In `/config`, each under `noxdeck.<name>`, or when installing in a shell with `-
 | `noxPalette` | `standard` (default), `nacht`, `retro` | The pixel Nox's palette: lavender, blue and silver, or shades of green. |
 | `noxCostume` | `ohne` (default), `zauberer`, `astronaut`, `detektiv`, `hacker`, `zufall` | The pixel Nox's costume: none, wizard, astronaut, detective or hacker. `zufall` (random) draws one of the four at each session's start and keeps it until the session ends, a reload included. The block Nox wears none. |
 | `animations` | `voll` (default), `ruhig`, `aus` | How much Nox moves: every animation, only blinking and the change of state, or a still picture. Claude Code's Reduce motion setting holds `voll` to `ruhig`. |
-| `limitStyle` | `hearts` (default), `bar` | How STATUS draws the 5-hour limit: five hearts or a ten-cell bar. |
+| `limitStyle` | `hearts` (default), `bar` | How STATUS draws the usage limit it shows (the 5-hour limit, else the weekly limit for all models): five hearts or a ten-cell bar. |
 | `theme` | `classic` (default) | The pane's color theme; it draws in your Claude Code theme's colors. |
 
 ## What this mod can do
 
-`claude plugin validate .` reads the hooks module the way Claude Code loads it and prints every event it hooks and every call it makes on `$`. For noxdeck 1.0.6:
+`claude plugin validate .` reads the hooks module the way Claude Code loads it and prints every event it hooks and every call it makes on `$`. For noxdeck 1.0.7:
 
 ```
 hooks: session.start, command.run{command=noxdeck}, ui.close{id=noxdeck}, tool.call, agent.spawn, tool.check, classic.PreToolUse, classic.PermissionRequest, classic.PermissionDenied, classic.PostToolUseFailure, classic.PostToolUse, turn.step, turn.start, turn.complete, session.measure, session.compact, session.end, ui.render{component=Pane, requestId=noxdeck}, ui.render{component=SessionMode}
@@ -101,7 +101,7 @@ No network, no file writes, no prompt logging: noxdeck makes no network requests
 | `turn.step` | Each model request's tokens, once its response is whole. | Nothing: every chunk and the result pass through as they came; model and effort are never rewritten. |
 | `turn.start` | A turn starting, the main chat's or a subagent's. | Nothing: the event passes on unchanged. |
 | `turn.complete` | A turn ending: why, how long, its tokens. | Nothing: the event passes on unchanged. |
-| `session.measure` | The context usage and the 5-hour limit changing. | Nothing: the event passes on unchanged. |
+| `session.measure` | The context usage and the usage limits (5-hour, weekly) changing. | Nothing: the event passes on unchanged. |
 | `session.compact` | A compaction, to count it. | Nothing: the event passes on unchanged. |
 | `session.end` | `/clear` or `/resume`, after which the pane starts over. | Nothing: the event passes on unchanged. |
 | `ui.render{component=Pane, requestId=noxdeck}` | – | Draws noxdeck's own pane. |

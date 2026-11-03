@@ -23,10 +23,10 @@ import {
   changeOf,
   effortText,
   exactOf,
-  fiveHourOf,
   hiddenCount,
   isAgentLive,
   lastAgents,
+  limitOf,
   NO_FOLDS,
   NO_HIDDEN,
   NO_LEDGER,
@@ -139,7 +139,7 @@ const tab = atom({ plugin: 'noxdeck', key: 'tab' } as const, 'live', SHAPE)
 const plan = atom({ plugin: 'noxdeck', key: 'plan' } as const, [], SHAPE)
 const context = atom({ plugin: 'noxdeck', key: 'context' } as const, null, SHAPE)
 const usage = atom({ plugin: 'noxdeck', key: 'usage' } as const, NO_USAGE, USAGE_SHAPE)
-const fiveHour = atom({ plugin: 'noxdeck', key: 'fiveHour' } as const, null, SHAPE)
+const limit = atom({ plugin: 'noxdeck', key: 'limit' } as const, null, SHAPE)
 const activity = atom({ plugin: 'noxdeck', key: 'activity' } as const, IDLE, SHAPE)
 const changes = atom({ plugin: 'noxdeck', key: 'changes' } as const, [], SHAPE)
 const missedFiles = atom({ plugin: 'noxdeck', key: 'missedFiles' } as const, 0, SHAPE)
@@ -170,6 +170,7 @@ const drawnCostume = atom({ plugin: 'noxdeck', key: 'costume' } as const, null, 
 const RETIRED_HAS_TODO_TOOL = { plugin: 'noxdeck', key: 'hasTodoTool' } as const
 const RETIRED_TURN = { plugin: 'noxdeck', key: 'turn' } as const
 const RETIRED_PACE = { plugin: 'noxdeck', key: 'pace' } as const
+const RETIRED_FIVE_HOUR = { plugin: 'noxdeck', key: 'fiveHour' } as const
 
 const MAX_FILES = 2000
 
@@ -195,7 +196,7 @@ const pathOf = (e: { tool: string } & Record<string, unknown>): string | null =>
  */
 async function refreshContext($: EngineInterface, isTurn: boolean): Promise<void> {
   const measured = await $.session.usage({ breakdown: 'summary' })
-  await update($, fiveHour, () => fiveHourOf(measured.rateLimits))
+  await update($, limit, () => limitOf(measured.rateLimits))
   const exact = exactOf(measured.context)
   const breakdown = measured.context.breakdown
   if (breakdown !== undefined) await update($, context, () => snapshotOf(breakdown, exact, measured.context.window))
@@ -530,7 +531,7 @@ async function animate($: EngineInterface, at: number): Promise<void> {
     await read($, cues),
     await read($, agents),
     await read($, context),
-    await read($, fiveHour),
+    await read($, limit),
     at,
     await read($, radar),
   )
@@ -702,6 +703,7 @@ export const register: Register = (on, options) => {
       await $.state.get(RETIRED_HAS_TODO_TOOL)
       await $.state.get(RETIRED_TURN)
       await $.state.get(RETIRED_PACE)
+      await $.state.get(RETIRED_FIVE_HOUR)
       await update($, root, () => e.cwd)
       const at = await $.clock.now()
       // zufall: the costume drawn at this session's start, from this moment; a reload keeps the one kept.
@@ -1115,7 +1117,7 @@ export const register: Register = (on, options) => {
   on('session.measure', async ($, e, next) => {
     const measured = await next(e)
     await quietly(async () => {
-      if (e.changed.includes('rateLimits')) await update($, fiveHour, () => fiveHourOf(e.rateLimits))
+      if (e.changed.includes('rateLimits')) await update($, limit, () => limitOf(e.rateLimits))
       if (e.changed.includes('context')) await refreshContext($, false)
     })
     return measured
@@ -1229,7 +1231,7 @@ export const register: Register = (on, options) => {
     const pictures: OwlPictures | null = isPicture ? { nox: noxSource(nox, palette), mini: miniSource(mini, palette) } : null
     const statusView = {
       activity: state,
-      fiveHour: await read($, fiveHour),
+      limit: await read($, limit),
       mood,
       agentsAtWork: agentsAtWorkOf(rows),
       pose: STILL,
