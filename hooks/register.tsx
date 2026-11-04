@@ -390,14 +390,49 @@ const agentsAsking = new Set<string>()
 /** How long a spawn waits for its loop's first turn; one refused or run elsewhere starts none here. */
 const SPAWN_WAIT_MS = 30_000
 
-/** A spawn waiting to be named: its prompt only as a hash, to tell its loop's first turn by. */
-type PendingSpawn = { promptKey: string; description: string; type: string; at: number }
+/** A spawn waiting to be named: its prompt only as a hash and a length, white space out, to tell its loop's first turn by. */
+type PendingSpawn = { promptKey: string; promptLength: number; isWorkflow: boolean; description: string; type: string; at: number }
 
 // agent.spawn passes its answer on unread, so a new agent's id comes from
 // elsewhere: the agent list names a subagent of the Agent tool; one it never
-// names (a workflow's) is known by its loop's first turn, which starts with
-// the spawn's prompt. Until then the spawn waits here.
+// names (a workflow's) is known by its loop's first turn. That turn's text is
+// the spawn's prompt as the harness frames it: a line or two above it, every
+// line of it indented, notes below it. Until then the spawn waits here.
 let pendingSpawns: PendingSpawn[] = []
+
+/** How the harness starts the text it frames a workflow agent's prompt in. */
+const HARNESS_FRAME = '[Workflow harness'
+
+/** The frame lines a prompt may stand under: the task's, and an automated run's above it. */
+const MAX_FRAME_LINES = 2
+
+/** A text with its white space out, the harness's indent and the line ends it rewrites with it. */
+const unspaced = (text: string): string => text.replace(/[\s\u001c-\u001e\u0085]+/g, '')
+
+/** `text`, white space out, from each line a prompt may start on. */
+function promptStartsOf(text: string): string[] {
+  const lines = text.split('\n')
+  return lines.slice(0, MAX_FRAME_LINES + 1).map((_, first) => unspaced(lines.slice(first).join('\n')))
+}
+
+/**
+ * The waiting spawn a loop's first turn belongs to: the one with the longest
+ * prompt the text starts with, on its first line or under the frame (a
+ * shorter one may only begin that prompt). With none, a framed text is a
+ * workflow's agent all the same (a run that hides its script gives spawns a
+ * placeholder) and takes the oldest workflow spawn. Any other text leaves
+ * those alone, so a compaction or memory fork that starts meanwhile takes
+ * none; a turn with no text takes the oldest of the other spawns.
+ */
+function spawnOfTurn(waiting: readonly PendingSpawn[], text: string): PendingSpawn | undefined {
+  const starts = promptStartsOf(text)
+  const told = waiting
+    .filter(one => one.promptLength > 0 && starts.some(start => hashOf(start.slice(0, one.promptLength)) === one.promptKey))
+    .reduce<PendingSpawn | undefined>((longest, one) => (longest === undefined || one.promptLength > longest.promptLength ? one : longest), undefined)
+  if (told !== undefined) return told
+  if (text.trimStart().startsWith(HARNESS_FRAME)) return waiting.find(one => one.isWorkflow)
+  return text === '' ? waiting.find(one => !one.isWorkflow) : undefined
+}
 
 /** The spawns still waiting at `at`; older ones are dropped. */
 function waitingSpawns(at: number): readonly PendingSpawn[] {
@@ -637,7 +672,15 @@ function showView($: EngineInterface, view: SiteView, refused: (reason: string) 
 function noteSpawn($: EngineInterface, spawned: Frozen<Args<'agent.spawn'>>): Promise<void> {
   return quietly(async () => {
     const at = await $.clock.now()
-    const spawn = { promptKey: hashOf(spawned.prompt), description: maskSecrets(spawned.description), type: spawned.subagentType, at }
+    const prompt = unspaced(spawned.prompt)
+    const spawn = {
+      promptKey: hashOf(prompt),
+      promptLength: prompt.length,
+      isWorkflow: spawned.workflow !== undefined,
+      description: maskSecrets(spawned.description),
+      type: spawned.subagentType,
+      at,
+    }
     pendingSpawns = [...waitingSpawns(at), spawn].slice(-20)
     // The mascot waves the new agent off; the tick reads the agent list while a spawn waits.
     await update($, cues, state => ({ ...state, wavedAt: at }))
@@ -1014,17 +1057,13 @@ export const register: Register = (on, options) => {
         const id = e.agentId
         // A loop nothing has named yet: the agent list names a subagent of
         // the Agent tool; one it does not (a workflow's agent) takes the
-        // spawn whose prompt its first turn starts with (for a turn that
-        // starts with none, the oldest waiting), and with it its name, its
-        // type and its tokens as the Agents pot's.
+        // spawn its first turn shows (spawnOfTurn), and with it its name,
+        // its type and its tokens as the Agents pot's.
         const isNamed = async () => (await read($, agents)).some(row => row.id === id && row.description !== null)
         let spawn: PendingSpawn | undefined
         if (!(await isNamed())) {
           await refreshAgents($)
-          if (!(await isNamed())) {
-            const key = hashOf(e.text)
-            spawn = takeSpawn(at, waiting => waiting.find(one => one.promptKey === key) ?? (e.text === '' ? waiting[0] : undefined))
-          }
+          if (!(await isNamed())) spawn = takeSpawn(at, waiting => spawnOfTurn(waiting, e.text))
         }
         await update($, agents, rows =>
           upsertAgent(rows, id, at, row => ({

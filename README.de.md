@@ -91,7 +91,7 @@ Kein Netzwerk, keine Dateischreibzugriffe, kein Prompt-Logging: noxdeck stellt k
 | `command.run{command=noxdeck}` | Nur `/noxdeck`; kein anderer Befehl erreicht ihn. | Beantwortet `/noxdeck` selbst: öffnet das Pane (auf dem genannten Tab) und antwortet mit einer Zeile. |
 | `ui.close{id=noxdeck}` | Das Schließen seines eigenen Panes. | Nein; er merkt sich, dass du es geschlossen hast, damit das Pane nicht von selbst wieder aufgeht. |
 | `tool.call` | Jeden Tool-Aufruf und sein Ergebnis: das Tool, den Namen einer Datei, die Zeilen, die eine Änderung hinzugefügt und entfernt hat, ob er fehlgeschlagen ist, Claudes Todo-Liste. | Nein: Aufruf und Ergebnis gehen unverändert weiter. |
-| `agent.spawn` | Den Start eines Subagents: seine Beschreibung und seinen Typ (seinen Prompt nur als Hash, um seinen ersten Turn daran zu erkennen). | Nein: `return next(e)`, die Antwort ungelesen. |
+| `agent.spawn` | Den Start eines Subagents: seine Beschreibung, seinen Typ, ob ein Workflow ihn gestartet hat (seinen Prompt nur als Hash und Länge, um seinen ersten Turn daran zu erkennen). | Nein: `return next(e)`, die Antwort ungelesen. |
 | `tool.check` | Dass ein Aufruf die Berechtigungsprüfung erreicht hat. | Nein: `return next(e)`, das Urteil ungelesen. |
 | `classic.PreToolUse` | Dass ein Aufruf die PreToolUse-Hooks erreicht hat. | Nein: `return next(e)`. |
 | `classic.PermissionRequest` | Das Öffnen eines Berechtigungsdialogs: Nox zeigt ein ?, bis der Aufruf endet. | Nein: `return next(e)`, die Antwort ungelesen. |

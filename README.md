@@ -91,7 +91,7 @@ No network, no file writes, no prompt logging: noxdeck makes no network requests
 | `command.run{command=noxdeck}` | Only `/noxdeck`; no other command reaches it. | Answers `/noxdeck` itself: opens the pane (on the tab named) and replies with one line. |
 | `ui.close{id=noxdeck}` | Its own pane closing. | Nothing; it remembers that you closed it, so the pane does not open by itself again. |
 | `tool.call` | Every tool call and its result: the tool, a file's name, the lines a change added and removed, whether it failed, Claude's todo list. | Nothing: the call and its result pass unchanged. |
-| `agent.spawn` | A subagent starting: its description and type (its prompt only as a hash, to tell its first turn by). | Nothing: `return next(e)`, the answer unread. |
+| `agent.spawn` | A subagent starting: its description, its type, whether a workflow started it (its prompt only as a hash and a length, to tell its first turn by). | Nothing: `return next(e)`, the answer unread. |
 | `tool.check` | That a call reached the permission check. | Nothing: `return next(e)`, the verdict unread. |
 | `classic.PreToolUse` | That a call reached the PreToolUse hooks. | Nothing: `return next(e)`. |
 | `classic.PermissionRequest` | A permission dialog opening: Nox shows a ? until the call ends. | Nothing: `return next(e)`, the answer unread. |
