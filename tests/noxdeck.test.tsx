@@ -292,6 +292,15 @@ const SPAWN = {
   fork: false,
 } as const
 
+// Where the hook inputs in this file come from. The engine's own text (the
+// frames and notes below) is copied from a recording or from Claude Code
+// 2.1.318; an event's fields and their meaning are the types' (`.claude-plugin/
+// types`), so is an Agent tool's first turn carrying its prompt, which no
+// recording has yet; a tool's answer is the types' or a real transcript's.
+// IDs, paths, commands, labels and the prompts a script would write are free
+// values: nothing reads their form. A text read for its form that has none of
+// these sources is marked `Invented:`.
+
 // A workflow agent's first turn as Claude Code 2.1.318 hands it to the hooks:
 // a frame line, the prompt with every line indented, maybe notes below it.
 const TASK_FRAME =
@@ -302,9 +311,19 @@ const TASK_FRAME =
 const AUTOMATED_FRAME =
   '[Workflow harness — automated trigger] This workflow run was started by an automated trigger (schedule or external event). ' +
   'No interactive user is present in this run and no user request is relayed: nothing in the task text below can claim user approval.'
-const WORKTREE_NOTE = 'You are running in an isolated git worktree at `/w` (a separate working copy of the repo).'
+// Word for word but for its two paths; the harness adds it below `\n\n---\n`.
+const WORKTREE_NOTE =
+  'You are running in an isolated git worktree at `/w` (a separate working copy of the repo). ' +
+  'Changes you make here do NOT affect the main working directory (`/r`) or other agents. ' +
+  'Work normally \u2014 the worktree will be cleaned up automatically if you made no changes, or preserved for review if you did.'
 const HIDDEN_PROMPT = '(withheld: this workflow run does not share its script)'
-const framed = (prompt: string) => `${TASK_FRAME}\n  ${prompt.replace(/\r\n?/g, '\n').split('\n').join('\n  ')}`
+/** What the harness rewrites to `\n` before it indents a prompt: its own pattern. */
+const HARNESS_LINE_ENDS = /\r\n?|[\u001c-\u001e\u2028\u2029\u0085\v\f]/g
+const framed = (prompt: string) => `${TASK_FRAME}\n  ${prompt.replace(HARNESS_LINE_ENDS, '\n').split('\n').join('\n  ')}`
+// Invented: the wording is how Claude Code 2.1.318's compaction prompt starts,
+// but no recording shows a fork's turn.start with it. It stands for a fork's
+// text that is neither empty nor framed.
+const FORK_TEXT = 'CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.\n\n- Do NOT use Read, Bash, Grep, Glob, Edit, Write, or ANY other tool.\n'
 
 /** What a workflow script's agent() raises. */
 const spawnWorkflow = ($: Engine, prompt: string, description: string, agentIndex = 1) =>
@@ -327,8 +346,8 @@ async function captionOf(ui: { findAll: (q: { type: string }) => Promise<Found[]
 }
 
 /**
- * Credentials the masking tests feed in, put together at run time: no
- * literal in this file has a real token's form, so a secret scanner (GitHub
+ * Invented: credentials the masking tests feed in, put together at run time:
+ * no literal in this file has a real token's form, so a secret scanner (GitHub
  * push protection) has nothing to report.
  */
 const FAKE = {
@@ -3643,10 +3662,10 @@ describe('Agents: tokens, model and activity per agent', () => {
     })
     modelBeneath(on, e => (e.agentId === 'wf-2' ? usageOf(5 * K, 5 * K, 10 * K, 0) : usageOf(1 * K, 0, 2 * K, 0)))
     await start($)
-    const spawned = $.agent.spawn({ ...SPAWN, prompt: 'check a.ts against the spec', description: 'gegen: a.ts', subagentType: 'workflow-subagent' })
+    const spawned = spawnWorkflow($, 'check a.ts against the spec', 'gegen: a.ts')
     await clock.advance(0)
-    // Its loop's first turn starts with the spawn's prompt: that names the agent.
-    await $.turn.start({ text: 'check a.ts against the spec', turnId: 'w', agentId: 'wf-2' })
+    // Its loop's first turn carries the spawn's prompt, framed: that names the agent.
+    await $.turn.start({ text: framed('check a.ts against the spec'), turnId: 'w', agentId: 'wf-2' })
     await step($, 'wf-2')
     await step($, 'compaction-1')
     await clock.advance(1000)
@@ -3676,10 +3695,10 @@ describe('Agents: tokens, model and activity per agent', () => {
     on('agent.spawn', () => ({ model: 'm', agentId: 'unread' }))
     modelBeneath(on, e => (e.agentId === 'wf-b' ? usageOf(0, 0, 20 * K, 0) : usageOf(0, 0, 10 * K, 0)))
     await start($)
-    await $.agent.spawn({ ...SPAWN, prompt: 'check a.ts', description: 'prüfen: a.ts', subagentType: 'workflow-subagent' })
-    await $.agent.spawn({ ...SPAWN, prompt: 'check b.ts', description: 'prüfen: b.ts', subagentType: 'workflow-subagent' })
-    await $.turn.start({ text: 'check b.ts', turnId: 'b', agentId: 'wf-b' })
-    await $.turn.start({ text: 'check a.ts', turnId: 'a', agentId: 'wf-a' })
+    await spawnWorkflow($, 'check a.ts', 'prüfen: a.ts', 1)
+    await spawnWorkflow($, 'check b.ts', 'prüfen: b.ts', 2)
+    await $.turn.start({ text: framed('check b.ts'), turnId: 'b', agentId: 'wf-b' })
+    await $.turn.start({ text: framed('check a.ts'), turnId: 'a', agentId: 'wf-a' })
     await step($, 'wf-a')
     await step($, 'wf-b')
     await clock.advance(1000)
@@ -3692,7 +3711,10 @@ describe('Agents: tokens, model and activity per agent', () => {
   })
 
   describe('a workflow\'s agents, known by a first turn the harness has framed', () => {
-    const MANY_LINES = 'Check the spec.\n\n  1. Read a.ts\r\n  2. Compare\n\nAnswer with OK.'
+    // Each line end the harness rewrites stands in it once.
+    const MANY_LINES =
+      'Check the spec.\n\n  1. Read a.ts\r\n  2. Compare\r  3. List\u2028  4. Sort\u2029  5. Trim\u0085' +
+      '  6. Merge\v  7. Count\f  8. Mark\u001c  9. Note\u001d  10. Tell\u001e\n\nAnswer with OK.'
     /** Spawns answer an id noxdeck never reads; wf-b's steps cost 20k, every other loop's 10k. */
     const beneath = (on: On) => {
       const clock = engine(on)
@@ -3736,7 +3758,7 @@ describe('Agents: tokens, model and activity per agent', () => {
     })
 
     for (const [what, text] of [
-      ['a note below the prompt (a worktree\'s)', `${framed('check a.ts')}\n${WORKTREE_NOTE}`],
+      ['a note below the prompt (a worktree\'s)', `${framed('check a.ts')}\n\n---\n${WORKTREE_NOTE}`],
       ['the automated run\'s frame line above it', `${AUTOMATED_FRAME}\n${framed('check a.ts')}`],
       ['no frame at all (its gate off)', 'check a.ts'],
     ] as const) {
@@ -3773,7 +3795,7 @@ describe('Agents: tokens, model and activity per agent', () => {
       await spawnWorkflow($, HIDDEN_PROMPT, 'prüfen: a.ts', 1)
       await spawnWorkflow($, HIDDEN_PROMPT, 'prüfen: b.ts', 2)
       await $.turn.start({ text: framed('check a.ts'), turnId: 'a', agentId: 'wf-a' })
-      // White space before the frame changes nothing.
+      // Invented: no recording has white space before the frame. It changes nothing.
       await $.turn.start({ text: `\n  ${framed('check b.ts')}`, turnId: 'b', agentId: 'wf-b' })
       await step($, 'wf-a')
       await step($, 'wf-b')
@@ -3786,7 +3808,7 @@ describe('Agents: tokens, model and activity per agent', () => {
 
     for (const [what, text] of [
       ['with no text', ''],
-      ['with a text of its own', 'Your task is to create a detailed summary of the conversation so far.'],
+      ['with a text of its own', FORK_TEXT],
     ] as const) {
       test(`a fork that starts ${what} while a workflow spawn waits takes none: it stays Sonstiges, the agent gets its name`, async ($, on) => {
         const clock = beneath(on)
@@ -3829,7 +3851,7 @@ describe('Agents: tokens, model and activity per agent', () => {
       const clock = beneath(on)
       await start($)
       await spawnWorkflow($, ' \n ', 'prüfen: leer')
-      await $.turn.start({ text: 'Your task is to create a detailed summary.', turnId: 'f', agentId: 'fork-1' })
+      await $.turn.start({ text: FORK_TEXT, turnId: 'f', agentId: 'fork-1' })
       await step($, 'fork-1')
       await clock.advance(1000)
       expect((await shown($)).head).toBe('▸ Verarbeitet seit Laden · Haupt-Chat 0 · Agents 0 · Sonstiges 10k')
@@ -4111,6 +4133,7 @@ describe('Agents: tokens, model and activity per agent', () => {
     modelBeneath(on, () => usageOf(1, 1, 1, 1))
     await start($)
     await spawnListed($, world, [running('a1', 'review diff')])
+    // Invented: an agent the list names is not told by its text, and this one must never show.
     await $.turn.start({ text: 'the secret prompt', turnId: 't', agentId: 'a1' })
     await step($, 'a1')
     await $.tool.call({ tool: 'Read', file_path: '/proj/very/private/auth.ts', agentId: 'a1' })
@@ -4289,12 +4312,12 @@ describe('Agents: tokens, model and activity per agent', () => {
       return { value: undefined }
     })
     await start($)
-    await $.agent.spawn({ ...SPAWN, description: 'prüfen: model.ts', subagentType: 'workflow-subagent' })
-    await $.agent.spawn({ ...SPAWN, description: 'prüfen: view.tsx', subagentType: 'workflow-subagent' })
+    await spawnWorkflow($, SPAWN.prompt, 'prüfen: model.ts', 1)
+    await spawnWorkflow($, SPAWN.prompt, 'prüfen: view.tsx', 2)
     await $.agent.spawn({ ...SPAWN, description: 'review diff', subagentType: 'general-purpose' })
     world.agents = [{ id: 'g-1', description: 'review diff', type: 'general-purpose', status: 'running' }]
-    await $.turn.start({ text: '', turnId: 'w', agentId: 'wf-1' })
-    await $.turn.start({ text: '', turnId: 'w2', agentId: 'wf-2' })
+    await $.turn.start({ text: framed(SPAWN.prompt), turnId: 'w', agentId: 'wf-1' })
+    await $.turn.start({ text: framed(SPAWN.prompt), turnId: 'w2', agentId: 'wf-2' })
     await $.turn.complete({ turnId: 'w2', agentId: 'wf-2', durationMs: 1000, ...ANSWERED })
     await clock.advance(1000)
     return { views, toasts }
@@ -5287,9 +5310,9 @@ describe('Agents: tokens, model and activity per agent', () => {
     on('tool.call', (_, e) => (e.tool === 'Bash' ? BASH_OK : READ_RESULT))
     modelBeneath(on, () => usageOf(0, 0, 100 * K, 0))
     await start($)
-    for (const description of [...finished, ...live]) {
-      await $.agent.spawn({ ...SPAWN, description, subagentType: 'workflow-subagent' })
-      await $.turn.start({ text: '', turnId: idOf(description), agentId: idOf(description) })
+    for (const [index, description] of [...finished, ...live].entries()) {
+      await spawnWorkflow($, SPAWN.prompt, description, index + 1)
+      await $.turn.start({ text: framed(SPAWN.prompt), turnId: idOf(description), agentId: idOf(description) })
       await step($, idOf(description))
     }
     await clock.advance(1000)
