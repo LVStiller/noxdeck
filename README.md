@@ -125,6 +125,8 @@ noxdeck makes no network requests. What leaves the module goes to Claude Code on
 | `$.state.get`, `$.state.set` | Keep the pane's figures in noxdeck's own state for the session; nothing is written to disk. |
 | `$.clock.now`, `$.clock.every`, `$.clock.after` | Read the time and run the pane's timer. |
 
+noxdeck has no MCP server and forwards no environment variables. [`hooks/secrets.ts`](hooks/secrets.ts) only masks displayed text: it replaces what looks like a token, key or password in a tool call's text before the pane keeps or shows it. It reads no environment variables or credential files, and what it masks is dropped.
+
 ## Develop
 
 ```sh

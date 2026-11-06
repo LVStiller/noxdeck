@@ -125,6 +125,8 @@ noxdeck stellt keine Netzwerkanfragen. Was das Modul verlässt, geht an Claude C
 | `$.state.get`, `$.state.set` | Halten die Zahlen des Panes für die Sitzung in noxdecks eigenem State; nichts wird auf die Platte geschrieben. |
 | `$.clock.now`, `$.clock.every`, `$.clock.after` | Lesen die Zeit und betreiben den Timer des Panes. |
 
+noxdeck hat keinen MCP-Server und reicht keine Umgebungsvariablen weiter. [`hooks/secrets.ts`](hooks/secrets.ts) maskiert nur angezeigten Text: Es ersetzt, was im Text eines Tool-Aufrufs wie ein Token, ein Schlüssel oder ein Passwort aussieht, bevor das Pane ihn behält oder zeigt. Es liest keine Umgebungsvariablen und keine Dateien mit Zugangsdaten, und was es maskiert, wird verworfen.
+
 ## Entwickeln
 
 ```sh

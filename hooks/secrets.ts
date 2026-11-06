@@ -101,8 +101,8 @@ const RULES: readonly Rule[] = [
       /(\b(?:echo|printf)\s+(?:-\w+\s+)*)("[^"]*"|'[^']*'|[^\s|]+)(?=\s*\|[^\n]*?(?:\bsudo\s+(?:-\w+\s+)*-S\b|--password-stdin|\bchpasswd\b|--passphrase-fd|\bpasswd\s+--stdin))/g,
     replace: (_, head: string, value: string) => `${head}${masked(value)}`,
   },
-  // A value given to a credential's name: `API_KEY=…`, `?secret=…`,
-  // `env['PASSWORD'] = …`, `"token": "…"`, `password: …`. A name is tried from
+  // A value given to a credential's name: `name=…`, `?secret=…`,
+  // `map['name'] = …`, `"token": "…"`, `password: …`. A name is tried from
   // its start only, so a long run of name characters costs one pass.
   {
     pattern: new RegExp(

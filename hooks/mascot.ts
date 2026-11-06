@@ -441,7 +441,7 @@ const SLEEP_BREATH_MS = 6000
 
 /** Where `at` falls in a cycle of `period` ms. */
 const phase = (at: number, period: number) => ((at % period) + period) % period
-const since = (at: number, then: number | null) => (then === null ? Number.POSITIVE_INFINITY : at - then)
+const since = (at: number, from: number | null) => (from === null ? Number.POSITIVE_INFINITY : at - from)
 /** The step `at` falls on in a cycle of `steps` steps, `stepMs` each. */
 const step = (at: number, stepMs: number, steps: number) => Math.floor(phase(at, stepMs * steps) / stepMs)
 
