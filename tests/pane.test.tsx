@@ -1,6 +1,6 @@
 import { describe, expect, test as kitTest } from 'claude-code/testing'
-import type { AgentInfo, PluginRegisterInput, SessionRateLimit } from 'claude-code'
-import { bashChangesOf, hiddenCount, isCachePath, NO_HIDDEN, projectPath, withHidden } from '../hooks/model'
+import type { AgentInfo, BuiltinToolResults, PluginRegisterInput, SessionRateLimit } from 'claude-code'
+import { bashChangesOf, hiddenCount, isCachePath, NO_HIDDEN, planFromTaskList, planWithTask, projectPath, withHidden } from '../hooks/model'
 import { LOCALES, stringsOf } from '../hooks/strings'
 import {
   SURFACES,
@@ -33,6 +33,7 @@ import {
   has,
 } from './helpers'
 import type { World, Found, Size } from './helpers'
+import type { PlanStep } from '../types'
 
 const KEPT = [{ role: 'user' as const, text: 'summary', toolUses: [] }]
 
@@ -91,6 +92,75 @@ describe('plan', () => {
     expect(await ui.find({ type: 'Text', text: /Drop me/ })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: '0/1' })).toBeDefined()
     await ui.unmount()
+  })
+
+  // The answers of TaskList and TaskGet as Claude Code's types write them:
+  // `BuiltinToolResults` holds these values to it. No transcript has either tool.
+  const KNOWN: PlanStep[] = [
+    { id: '1', text: 'Write the parser', activeText: 'Writing the parser', status: 'in_progress' },
+    { id: '2', text: 'Run the tests', activeText: 'Running the tests', status: 'pending' },
+    { id: '9', text: 'Gone by now', activeText: null, status: 'pending' },
+  ]
+  const LISTED: BuiltinToolResults['TaskList'] = {
+    tasks: [
+      { id: '1', subject: 'Write the parser', status: 'completed', blockedBy: [] },
+      { id: '2', subject: 'Run the tests', status: 'in_progress', owner: 'main', blockedBy: ['1'] },
+      { id: '3', subject: 'Write the docs', status: 'pending', blockedBy: ['2'] },
+    ],
+  }
+  const NOTHING_LISTED: BuiltinToolResults['TaskList'] = { tasks: [] }
+  const FOUND: BuiltinToolResults['TaskGet'] = {
+    task: { id: '2', subject: 'Run every test', description: 'All five files', status: 'completed', blocks: ['3'], blockedBy: ['1'] },
+  }
+  const NOT_FOUND: BuiltinToolResults['TaskGet'] = { task: null }
+
+  test('a TaskList replaces the plan: its tasks in its order, a known step keeps its running form, the rest is gone', () => {
+    expect(planFromTaskList(KNOWN, LISTED)).toEqual([
+      { id: '1', text: 'Write the parser', activeText: 'Writing the parser', status: 'completed' },
+      { id: '2', text: 'Run the tests', activeText: 'Running the tests', status: 'in_progress' },
+      { id: '3', text: 'Write the docs', activeText: null, status: 'pending' },
+    ])
+  })
+
+  test('a TaskList without tasks empties the plan', () => {
+    expect(planFromTaskList(KNOWN, NOTHING_LISTED)).toEqual([])
+  })
+
+  test('a TaskGet changes a known step where it stands and keeps its running form', () => {
+    expect(planWithTask(KNOWN, FOUND)).toEqual([
+      KNOWN[0],
+      { id: '2', text: 'Run every test', activeText: 'Running the tests', status: 'completed' },
+      KNOWN[2],
+    ])
+  })
+
+  test('a TaskGet adds a step the plan does not know yet, at its end', () => {
+    expect(planWithTask(KNOWN.filter(step => step.id !== '2'), FOUND)).toEqual([
+      KNOWN[0],
+      KNOWN[2],
+      { id: '2', text: 'Run every test', activeText: null, status: 'completed' },
+    ])
+  })
+
+  test('a TaskGet that found no task leaves the plan as it is', () => {
+    expect(planWithTask(KNOWN, NOT_FOUND)).toEqual(KNOWN)
+  })
+
+  test('the answers of TaskList and TaskGet reach the PLAN card', async ($, on) => {
+    engine(on)
+    on('tool.call', (_, e) => ({ result: e.tool === 'TaskList' ? LISTED : FOUND }))
+    await start($)
+    await $.tool.call({ tool: 'TaskList' })
+    const listed = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect(await listed.find({ type: 'Text', text: '1/3' })).toBeDefined()
+    expect(await listed.find({ type: 'Text', text: 'Write the docs' })).toBeDefined()
+    await listed.unmount()
+
+    await $.tool.call({ tool: 'TaskGet', taskId: '2' })
+    const found = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect(await found.find({ type: 'Text', text: '2/3' })).toBeDefined()
+    expect(await found.find({ type: 'Text', text: 'Run every test' })).toBeDefined()
+    await found.unmount()
   })
 })
 
