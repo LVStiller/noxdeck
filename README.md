@@ -51,6 +51,7 @@ To update: `claude plugin marketplace update noxdeck`, `claude plugin update nox
 - The pane opens by itself on terminals 144 columns or wider (the fullscreen layout docks it beside the transcript).
 - `/noxdeck` opens it at any width; `/noxdeck live`, `/noxdeck changes` and `/noxdeck agents` open it on that tab.
 - Click a tab, or focus the pane (ctrl+x tab) and use Tab and Enter.
+- Inline above the prompt (the fullscreen layout under 110 columns, the main screen always, as in tmux) the pane takes little height: title and tabs in one row, from 80 columns STATUS and CONTEXT side by side, with the mini owl where the terminal draws pictures, and RADAR or PLAN in one row; narrower, the state, the limit, the context bar and one RADAR row. What finds no room is counted, never cut off silently.
 
 ## Tested with
 
@@ -72,7 +73,7 @@ In `/config`, each under `noxdeck.<name>`, or when installing in a shell with `-
 
 ## What this mod can do
 
-`claude plugin validate .` reads the hooks module the way Claude Code loads it and prints every event it hooks and every call it makes on `$`. For noxdeck 1.0.8:
+`claude plugin validate .` reads the hooks module the way Claude Code loads it and prints every event it hooks and every call it makes on `$`. For noxdeck 1.0.9:
 
 ```
 hooks: session.start, command.run{command=noxdeck}, ui.close{id=noxdeck}, tool.call, agent.spawn, tool.check, classic.PreToolUse, classic.PermissionRequest, classic.PermissionDenied, classic.PostToolUseFailure, classic.PostToolUse, turn.step, turn.start, turn.complete, session.measure, session.compact, session.end, ui.render{component=Pane, requestId=noxdeck}, ui.render{component=SessionMode}

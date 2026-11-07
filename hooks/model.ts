@@ -567,6 +567,28 @@ export function legendLines(items: readonly LegendItem[], width: number): Legend
   return { ...last, lines, cut: items.length - lines.flat().length }
 }
 
+/** The legend in one line: which items fit, in the given order, the wider gap where it shows as many, and how many are left out. */
+export type LegendLine = { shown: number; gap: number; cut: number }
+
+/** The first items of a legend that fit `width` cells with `+cut` behind them, spelled out in full. */
+export function legendLine(items: readonly LegendItem[], width: number): LegendLine {
+  const fitting = (gap: number): LegendLine => {
+    let used = 0
+    let shown = 0
+    for (const item of items) {
+      const size = used + (shown > 0 ? gap : 0) + legendSize(item, false, false)
+      const cut = items.length - shown - 1
+      if (size + (cut > 0 ? gap + 1 + String(cut).length : 0) > width) break
+      used = size
+      shown += 1
+    }
+    return { shown, gap, cut: items.length - shown }
+  }
+  const wide = fitting(2)
+  const tight = fitting(1)
+  return tight.shown > wide.shown ? tight : wide
+}
+
 /** Parts joined by ` · `, broken into lines only between parts. */
 export function flowParts(parts: readonly string[], width: number): string[] {
   const lines: string[] = []

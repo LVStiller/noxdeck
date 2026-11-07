@@ -32,6 +32,8 @@ export type Strings = {
   /** Where a figure is not known: a card's note, a share, a file's lines. */
   na: string
   tabs: { changes: string; agents: string; live: string }
+  /** Rows of the inline view that found no room. */
+  hidden: (count: number) => string
   titles: { plan: string; radar: string; context: string; status: string; changes: string; agents: string }
   /** The context sources' labels in the legend, and shorter ones where room is short. */
   sources: Record<SourceKey, string>
@@ -68,6 +70,8 @@ export type Strings = {
     compactOff: string
     compactDue: string
     compactNA: string
+    /** The same four, shorter: beside the owl, where the long ones do not fit. */
+    compactShort: { in: (turns: number) => string; off: string; due: string; na: string }
     tools: (count: number) => string
     deferred: string
     none: string
@@ -199,6 +203,7 @@ const SHARED = {
 
 const de: Strings = {
   ...SHARED,
+  hidden: count => `+${count} ausgeblendet`,
   percent: value => `${value}${NBSP}%`,
   percentTight: value => `${value}%`,
   decimal: ',',
@@ -228,6 +233,7 @@ const de: Strings = {
     compactOff: 'Auto-Compact aus',
     compactDue: 'Auto-Compact fällig',
     compactNA: 'Auto-Compact n/a',
+    compactShort: { in: turns => `Compact ~${turns} ${turns === 1 ? 'Turn' : 'Turns'}`, off: 'Compact aus', due: 'Compact fällig', na: 'Compact n/a' },
     tools: count => `${count} ${count === 1 ? 'Tool' : 'Tools'}`,
     deferred: 'deferred',
     none: 'keine',
@@ -354,6 +360,7 @@ const de: Strings = {
 
 const en: Strings = {
   ...SHARED,
+  hidden: count => `+${count} hidden`,
   percent: value => `${value}%`,
   percentTight: value => `${value}%`,
   decimal: '.',
@@ -383,6 +390,7 @@ const en: Strings = {
     compactOff: 'Auto-Compact off',
     compactDue: 'Auto-Compact due',
     compactNA: 'Auto-Compact n/a',
+    compactShort: { in: turns => `Compact ~${turns} ${turns === 1 ? 'Turn' : 'Turns'}`, off: 'Compact off', due: 'Compact due', na: 'Compact n/a' },
     tools: count => `${count} ${count === 1 ? 'Tool' : 'Tools'}`,
     deferred: 'deferred',
     none: 'none',

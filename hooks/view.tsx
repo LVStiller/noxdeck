@@ -41,6 +41,7 @@ import {
   isAgentLive,
   isGroupOpen,
   isEndedStatus,
+  legendLine,
   legendLines,
   limitLeft,
   modelShort,
@@ -132,6 +133,26 @@ export function wrappedRows(text: string, width: number): number {
 
 // ---------------------------------------------------------------- frames
 
+const tabsOf = (s: Strings): readonly { id: Tab; label: string }[] => [
+  { id: 'changes', label: s.tabs.changes },
+  { id: 'agents', label: s.tabs.agents },
+  { id: 'live', label: s.tabs.live },
+]
+
+/** A tab, pressed to show it: on the accent while it shows. */
+function tabButton(ui: Ui, one: { id: Tab; label: string }, tab: Tab, onTab: (tab: Tab) => void): RenderElement {
+  const { Button, Text, theme } = ui
+  return (
+    <Button key={`tab-${one.id}`} label={one.label} plain onPress={() => onTab(one.id)}>
+      {one.id === tab ? (
+        <Text bold color={theme.onAccent} backgroundColor={theme.accent}>{` ${one.label} `}</Text>
+      ) : (
+        <Text dimColor>{` ${one.label} `}</Text>
+      )}
+    </Button>
+  )
+}
+
 /**
  * The whole pane: a rounded frame with `noxdeck` in its top line, the tabs,
  * an empty line, then the cards stacked border to border. `ui.width` is the
@@ -140,14 +161,9 @@ export function wrappedRows(text: string, width: number): number {
  * line looks empty whether or not the terminal draws pictures.
  */
 export function frame(ui: Ui, tab: Tab, onTab: (tab: Tab) => void, body: RenderChildren, probe: ImageSource | null = null): RenderElement {
-  const { Box, Text, Button, theme, s } = ui
+  const { Box, Text, theme, s } = ui
   const width = ui.width + PANE_INSET
   const isTerminal = ui.surface === 'terminal'
-  const tabs: readonly { id: Tab; label: string }[] = [
-    { id: 'changes', label: s.tabs.changes },
-    { id: 'agents', label: s.tabs.agents },
-    { id: 'live', label: s.tabs.live },
-  ]
   return (
     <Box flexDirection="column" width={width}>
       <Box flexDirection="column" borderStyle="round" borderColor={theme.frame} paddingX={1} width={width}>
@@ -157,15 +173,7 @@ export function frame(ui: Ui, tab: Tab, onTab: (tab: Tab) => void, body: RenderC
           </Text>
         )}
         <Box flexWrap="wrap" columnGap={1}>
-          {tabs.map(one => (
-            <Button key={`tab-${one.id}`} label={one.label} plain onPress={() => onTab(one.id)}>
-              {one.id === tab ? (
-                <Text bold color={theme.onAccent} backgroundColor={theme.accent}>{` ${one.label} `}</Text>
-              ) : (
-                <Text dimColor>{` ${one.label} `}</Text>
-              )}
-            </Button>
-          ))}
+          {tabsOf(s).map(one => tabButton(ui, one, tab, onTab))}
         </Box>
         {probe !== null && ui.Image !== null ? (
           <Box height={1}>
@@ -311,6 +319,17 @@ function oneLine(ui: Ui, title: string, text: string): Drawn {
   }
 }
 
+/** A step's words: Claude's own; masked all the same, as RADAR's are. */
+const stepLabel = (step: PlanStep) => maskSecrets(step.status === 'in_progress' ? (step.activeText ?? step.text) : step.text)
+
+/** How a step is drawn: its glyph and that glyph's color, its words dim or bold. */
+function stepLook(ui: Ui, step: PlanStep): { glyph: string; glyphColor: Color | null; isDim: boolean; isBold: boolean } {
+  const { theme } = ui
+  if (step.status === 'in_progress') return { glyph: '◉', glyphColor: theme.accent, isDim: false, isBold: true }
+  if (step.status === 'pending') return { glyph: '○', glyphColor: null, isDim: false, isBold: false }
+  return { glyph: '✓', glyphColor: theme.done, isDim: true, isBold: false }
+}
+
 /**
  * The PLAN card, at the bottom of the Live tab. `maxRows` is the most rows
  * it may take, its frame included (null: what it needs): the steps that do
@@ -324,16 +343,9 @@ export function planCard(ui: Ui, plan: readonly PlanStep[], maxRows: number | nu
   const done = plan.filter(step => step.status === 'completed').length
   const steps = orderedPlan(plan)
   const counter = [`${done}/${plan.length}`]
-  // The steps are Claude's own words; masked all the same, as RADAR's are.
-  const labelOf = (step: PlanStep) => maskSecrets(step.status === 'in_progress' ? (step.activeText ?? step.text) : step.text)
 
   const row = (step: PlanStep) => {
-    const [glyph, glyphColor, label, isDim, isBold] =
-      step.status === 'in_progress'
-        ? (['◉', theme.accent, labelOf(step), false, true] as const)
-        : step.status === 'pending'
-          ? (['○', null, labelOf(step), false, false] as const)
-          : (['✓', theme.done, labelOf(step), true, false] as const)
+    const { glyph, glyphColor, isDim, isBold } = stepLook(ui, step)
     return (
       <Box>
         <Text {...styled(glyphColor, null)} dimColor={glyphColor === null || isDim}>
@@ -341,13 +353,13 @@ export function planCard(ui: Ui, plan: readonly PlanStep[], maxRows: number | nu
         </Text>
         <Box flexShrink={1}>
           <Text bold={isBold} dimColor={isDim}>
-            {label}
+            {stepLabel(step)}
           </Text>
         </Box>
       </Box>
     )
   }
-  const stepRows = steps.map(step => wrappedRows(labelOf(step), inner(ui) - 2))
+  const stepRows = steps.map(step => wrappedRows(stepLabel(step), inner(ui) - 2))
   const all = stepRows.reduce((sum, n) => sum + n, 0)
   const room = maxRows === null ? Number.POSITIVE_INFINITY : maxRows - cardOverhead(ui, s.titles.plan, counter)
   if (all <= room) return card(ui, s.titles.plan, counter, steps.map(row), all)
@@ -412,6 +424,10 @@ function loopRows(ui: Ui, streak: FailStreak): RenderElement[] {
   ))
 }
 
+/** A call that failed again and again, by its command where it is a Bash call's. */
+const failedLabel = (s: Strings, failed: ReturnType<typeof repeatedOf>[number]) =>
+  failed.tool === 'Bash' && failed.detail !== null ? failed.detail : labelText(s, failed)
+
 /** What RADAR reads: failures and their run, the files most used, the time approval dialogs stood open. */
 export type RadarView = { radar: Radar; cues: Cues; now: number }
 
@@ -432,10 +448,9 @@ export function radarCard(ui: Ui, view: RadarView, maxRows: number | null = null
   if (loop !== null) rows.push(...loopRows(ui, loop))
   // The loose stage, dim and in RADAR only: a call that failed four times in this turn, whatever came between.
   for (const failed of repeatedOf(radar)) {
-    const label = failed.tool === 'Bash' && failed.detail !== null ? failed.detail : labelText(s, failed)
     rows.push(
       <Text dimColor wrap="truncate-end">
-        {s.radar.failedTimes(failed.count, label)}
+        {s.radar.failedTimes(failed.count, failedLabel(s, failed))}
       </Text>,
     )
   }
@@ -503,21 +518,24 @@ const sourceColor = (theme: Theme, key: string, fallback: string): Color => them
 
 const LABEL_WIDTH = 6
 
-export function contextCard(ui: Ui, context: ContextSnapshot | null, usage: UsageTrack): Drawn {
-  const { Box, Text, theme, s } = ui
-  if (context === null) return card(ui, s.titles.context, [s.na], <Text dimColor>{s.context.notMeasured}</Text>, 1)
-
-  const width = inner(ui)
-  // One window for the whole card: header, bar, legend, mark and history agree.
+/** The window's fill as the card's header writes it: measured figures plainly, the breakdown's estimates with ≈. */
+function contextCounter(ui: Ui, context: ContextSnapshot): readonly string[] {
+  const { s } = ui
   const max = context.window
   const exact = context.exact
-  // Measured figures are written plainly; the breakdown's estimates carry ≈.
-  const counter = exact
+  return exact
     ? [s.percent(Math.round(exact.percent)), `${tokens(ui, exact.tokens)} / ${tokens(ui, exact.window)}`]
     : [`≈${s.percent(Math.round((context.totalTokens / max) * 100))}`, `≈${tokens(ui, context.totalTokens)} / ${tokens(ui, max)}`]
+}
 
-  // The bar: full cells, one run per source (each at least one cell), the
-  // free window a quiet dark grey, and a fine mark at the auto-compact threshold.
+/**
+ * The bar, `width` cells: full cells, one run per source (each at least one
+ * cell), the free window a quiet dark grey, and a fine mark at the
+ * auto-compact threshold.
+ */
+function contextBar(ui: Ui, context: ContextSnapshot, width: number): RenderElement {
+  const { Text, theme } = ui
+  const max = context.window
   const counts = barCells(
     context.sources.map(source => source.tokens),
     max,
@@ -535,15 +553,56 @@ export function contextCard(ui: Ui, context: ContextSnapshot | null, usage: Usag
     const at = Math.max(0, Math.min(width - 1, Math.floor((context.threshold / max) * width)))
     cells[at] = { char: theme.bar.marker, color: theme.marker, backgroundColor: cells[at]?.color ?? null }
   }
+  return (
+    <Text wrap="truncate">
+      {runsOf(cells).map(run => (
+        <Text {...styled(run.color, run.backgroundColor)}>{run.char}</Text>
+      ))}
+    </Text>
+  )
+}
 
-  // Every share is the breakdown's estimate: ≈ on each.
-  const items: LegendItem[] = context.sources.map(source => ({
+/** The legend's items, in bar order. Every share is the breakdown's estimate: ≈ on each. */
+function legendItemsOf(ui: Ui, context: ContextSnapshot): LegendItem[] {
+  const { s } = ui
+  const max = context.window
+  return context.sources.map(source => ({
     key: source.key,
     label: s.sources[source.key as SourceKey] ?? source.key,
     short: s.sourcesShort[source.key as SourceKey] ?? source.key,
     value: `≈${share(source.tokens, max, s.percent, s.decimal, s.na)}`,
     compact: `≈${share(source.tokens, max, s.percentTight, s.decimal, s.na)}`,
   }))
+}
+
+/** The tokens the window holds now: the measured figure, else the breakdown's. */
+const contextTokens = (context: ContextSnapshot) => context.exact?.tokens ?? context.totalTokens
+
+/** The growth per turn and how far auto-compaction is, in words and shorter. */
+function growthWords(ui: Ui, context: ContextSnapshot, usage: UsageTrack): { perTurn: string; compactIn: string; compactShort: string } {
+  const { s } = ui
+  const current = contextTokens(context)
+  const growth = growthOf(usage.history, current, context.threshold)
+  const perTurn =
+    growth.perTurn === null
+      ? s.context.perTurnNA
+      : s.context.perTurn(`${growth.perTurn < 0 ? '−' : '+'}${tokens(ui, Math.abs(growth.perTurn))}`)
+  if (context.threshold === null) return { perTurn, compactIn: s.context.compactOff, compactShort: s.context.compactShort.off }
+  if (current >= context.threshold) return { perTurn, compactIn: s.context.compactDue, compactShort: s.context.compactShort.due }
+  if (growth.turnsLeft === null) return { perTurn, compactIn: s.context.compactNA, compactShort: s.context.compactShort.na }
+  return { perTurn, compactIn: s.context.compactIn(growth.turnsLeft), compactShort: s.context.compactShort.in(growth.turnsLeft) }
+}
+
+export function contextCard(ui: Ui, context: ContextSnapshot | null, usage: UsageTrack): Drawn {
+  const { Box, Text, theme, s } = ui
+  if (context === null) return card(ui, s.titles.context, [s.na], <Text dimColor>{s.context.notMeasured}</Text>, 1)
+
+  const width = inner(ui)
+  // One window for the whole card: header, bar, legend, mark and history agree.
+  const max = context.window
+  const counter = contextCounter(ui, context)
+
+  const items = legendItemsOf(ui, context)
   const legend = legendLines(items, width)
   const legendRow = (line: readonly number[], row: number) => (
     <Text wrap="truncate">
@@ -575,20 +634,8 @@ export function contextCard(ui: Ui, context: ContextSnapshot | null, usage: Usag
       : 0,
   )
   const chart = brailleRows(values, top, chars)
-  const current = exact?.tokens ?? context.totalTokens
-  const growth = growthOf(usage.history, current, context.threshold)
-  const perTurn =
-    growth.perTurn === null
-      ? s.context.perTurnNA
-      : s.context.perTurn(`${growth.perTurn < 0 ? '−' : '+'}${tokens(ui, Math.abs(growth.perTurn))}`)
-  const compactIn =
-    context.threshold === null
-      ? s.context.compactOff
-      : current >= context.threshold
-        ? s.context.compactDue
-        : growth.turnsLeft === null
-          ? s.context.compactNA
-          : s.context.compactIn(growth.turnsLeft)
+  const current = contextTokens(context)
+  const { perTurn, compactIn } = growthWords(ui, context, usage)
 
   // The breakdown: a table, label grey, name bright, value right-aligned.
   const labelWidth = Math.max(s.rows.mcp.length, s.rows.memory.length, s.rows.skills.length) + 1
@@ -644,11 +691,7 @@ export function contextCard(ui: Ui, context: ContextSnapshot | null, usage: Usag
     s.titles.context,
     counter,
     [
-    <Text wrap="truncate">
-      {runsOf(cells).map(run => (
-        <Text {...styled(run.color, run.backgroundColor)}>{run.char}</Text>
-      ))}
-    </Text>,
+    contextBar(ui, context, width),
     ...legend.lines.map((line, row) => legendRow(line, row)),
     <Box>
       <Text color={theme.accent}>{theme.bar.threshold.repeat(chars)}</Text>
@@ -759,6 +802,74 @@ function owlRow(ui: Ui, runs: readonly Run[]): RenderElement {
   )
 }
 
+/** The file in hand, else the last one edited, as STATUS says it. */
+function editPart(ui: Ui, activity: Activity): Part {
+  const { theme, s } = ui
+  if (activity.editing !== null) return { text: s.status.editing(maskSecrets(baseName(activity.editing))), bold: true, color: theme.accent }
+  return { text: activity.lastEdited !== null ? s.status.lastEdit(maskSecrets(baseName(activity.lastEdited))) : s.status.noEdits, dimColor: true }
+}
+
+/**
+ * What the limit says: the share left (null once the window's reset time has
+ * passed: the reading is the last response's and no longer stands), the
+ * sentence around it, and when the window resets, only while its reading
+ * stands; the week's with its weekday, as it may be days away.
+ */
+function limitReading(ui: Ui, view: Pick<StatusView, 'limit' | 'now'>) {
+  const { s } = ui
+  const { limit, now } = view
+  const left = limitLeft(limit, now)
+  const kind = limit?.kind ?? 'five_hour'
+  const leftText = left !== null && left > 0 && left < 0.5 ? `<${s.percent(1)}` : s.percent(Math.round(left ?? 0))
+  const clockTime = left === null ? null : resetClockOf(limit?.resetsAt ?? null)
+  const day = kind === 'seven_day' ? resetDayOf(limit?.resetsAt ?? null) : null
+  const weekday = day === null ? undefined : s.status.weekdays[day]
+  const resetTime = clockTime === null || weekday === undefined ? clockTime : `${weekday} ${clockTime}`
+  return { left, kind, leftText, sentence: s.status.limit[kind](leftText), reset: resetTime === null ? null : s.status.resetAt(resetTime) }
+}
+
+/** The cells the limit's hearts or bar take. */
+const limitCells = (ui: Ui, style: LimitStyle) => (style === 'hearts' ? 10 : ui.theme.limitBar.cells)
+
+/**
+ * The limit's line: its hearts or bar, then `words`. Where its reading no
+ * longer stands it says so instead; without a window (off a subscription,
+ * nothing measured yet) no line.
+ */
+function limitLineOf(ui: Ui, view: Pick<StatusView, 'limit' | 'limitStyle'>, reading: ReturnType<typeof limitReading>, words: string): RenderElement | null {
+  const { Text, theme, s } = ui
+  const { left, kind } = reading
+  const hearts = theme.limitHearts
+  const cells = view.limitStyle === 'hearts' ? 5 : theme.limitBar.cells
+  const full = left === null ? 0 : cellsFull(left, cells)
+  return view.limit === null ? null : left === null ? (
+    <Text dimColor wrap="truncate-end">
+      {s.status.limitReset[kind]}
+    </Text>
+  ) : view.limitStyle === 'hearts' ? (
+    // A space after every heart, so a glyph drawn wider than its cell spills
+    // into it; two between the last heart and the text.
+    <Text wrap="truncate">
+      <Text color={theme.heart}>{`${hearts.full} `.repeat(full)}</Text>
+      <Text color={hearts.emptyColor}>{`${hearts.empty} `.repeat(cells - full)}</Text>
+      <Text dimColor>{words}</Text>
+    </Text>
+  ) : (
+    <Text wrap="truncate">
+      <Text color={theme.heart}>{theme.limitBar.cell.repeat(full)}</Text>
+      <Text color={theme.track}>{theme.limitBar.cell.repeat(cells - full)}</Text>
+      <Text dimColor>{words}</Text>
+    </Text>
+  )
+}
+
+/** The state beside the mini owl: `fertig` while it hops, then `bereit`: the caption's 30 s are Nox's. */
+function besideOwl(view: Pick<StatusView, 'activity' | 'mood' | 'now'>): Mood {
+  const { activity, mood, now } = view
+  const answered = activity.answeredAt === null ? Number.POSITIVE_INFINITY : now - activity.answeredAt
+  return mood === 'done' && answered >= HOP_MS ? 'ready' : mood
+}
+
 /**
  * The STATUS card, at the top of the Live tab. While a call fails again and
  * again its warning comes first, so it never leaves the visible rows; then
@@ -784,74 +895,29 @@ export function statusCard(ui: Ui, view: StatusView, owl: Owl): Drawn {
   const loop = loopOf(view.radar)
   const warning = loop === null ? [] : loopRows(ui, loop)
 
-  const editing =
-    activity.editing !== null ? (
-      <Text bold color={theme.accent} wrap="truncate-end">
-        {s.status.editing(maskSecrets(baseName(activity.editing)))}
-      </Text>
-    ) : activity.lastEdited !== null ? (
-      <Text dimColor wrap="truncate-end">
-        {s.status.lastEdit(maskSecrets(baseName(activity.lastEdited)))}
-      </Text>
-    ) : (
-      <Text dimColor wrap="truncate-end">
-        {s.status.noEdits}
-      </Text>
-    )
+  const edit = editPart(ui, activity)
+  const editing = (
+    <Text {...plainLook(edit)} wrap="truncate-end">
+      {edit.text}
+    </Text>
+  )
 
-  // The reading is the last response's; once its window's reset time has
-  // passed it no longer stands (`left` null), and the card says so instead
-  // of showing it. Without a window (off a subscription, nothing measured
-  // yet) no line.
-  const left = limitLeft(limit, now)
-  const kind = limit?.kind ?? 'five_hour'
-  const leftText = left !== null && left > 0 && left < 0.5 ? `<${s.percent(1)}` : s.percent(Math.round(left ?? 0))
-  const hearts = theme.limitHearts
-  const cells = limitStyle === 'hearts' ? 5 : theme.limitBar.cells
-  const full = left === null ? 0 : cellsFull(left, cells)
+  const reading = limitReading(ui, view)
   // The share left is never cut: where the sentence does not fit, the number alone follows the cells.
-  const sentence = ` ${s.status.limit[kind](leftText)}`
-  const drawnCells = limitStyle === 'hearts' ? 2 * cells : cells
-  const words = drawnCells + sentence.length <= room ? sentence : ` ${leftText}`
-  const limitLine =
-    limit === null ? null : left === null ? (
-      <Text dimColor wrap="truncate-end">
-        {s.status.limitReset[kind]}
-      </Text>
-    ) : limitStyle === 'hearts' ? (
-      // A space after every heart, so a glyph drawn wider than its cell spills
-      // into it; two between the last heart and the text.
-      <Text wrap="truncate">
-        <Text color={theme.heart}>{`${hearts.full} `.repeat(full)}</Text>
-        <Text color={hearts.emptyColor}>{`${hearts.empty} `.repeat(cells - full)}</Text>
-        <Text dimColor>{words}</Text>
-      </Text>
-    ) : (
-      <Text wrap="truncate">
-        <Text color={theme.heart}>{theme.limitBar.cell.repeat(full)}</Text>
-        <Text color={theme.track}>{theme.limitBar.cell.repeat(cells - full)}</Text>
-        <Text dimColor>{words}</Text>
-      </Text>
-    )
-  // Under the limit, when the window resets: only while its reading stands;
-  // the week's with its weekday, as it may be days away.
-  const clockTime = left === null ? null : resetClockOf(limit?.resetsAt ?? null)
-  const day = kind === 'seven_day' ? resetDayOf(limit?.resetsAt ?? null) : null
-  const weekday = day === null ? undefined : s.status.weekdays[day]
-  const resetTime = clockTime === null || weekday === undefined ? clockTime : `${weekday} ${clockTime}`
+  const sentence = ` ${reading.sentence}`
+  const words = limitCells(ui, limitStyle) + sentence.length <= room ? sentence : ` ${reading.leftText}`
+  const limitLine = limitLineOf(ui, view, reading, words)
   const reset =
-    resetTime === null ? null : (
+    reading.reset === null ? null : (
       <Text dimColor wrap="truncate-end">
-        {s.status.resetAt(resetTime)}
+        {reading.reset}
       </Text>
     )
 
   const lines = [editing, limitLine, reset].filter(line => line !== null)
 
   if (owl === 'mini') {
-    // `fertig` while it hops, then `bereit`: the caption's 30 s are Nox's.
-    const answered = activity.answeredAt === null ? Number.POSITIVE_INFINITY : now - activity.answeredAt
-    const state = mood === 'done' && answered >= HOP_MS ? 'ready' : mood
+    const state = besideOwl(view)
     const note = {
       text: moodWords(ui, state, agentsAtWork, titleRoom(ui) - s.titles.status.length - 3, true),
       color: isWaitedOn(state) ? theme.accent : null,
@@ -915,34 +981,43 @@ export function statusCard(ui: Ui, view: StatusView, owl: Owl): Drawn {
 
 const MAX_ROWS = 80
 
-export function changesCard(ui: Ui, changes: readonly FileChange[], missed: number, cacheFiles: number, root: string): RenderElement {
-  const { Text, theme, s } = ui
+/** The files changed and their lines, as the card's header says them; null for none. */
+function changesCounter(ui: Ui, changes: readonly FileChange[], missed: number): readonly string[] | null {
   const known = changes.filter(change => change.added !== null && change.removed !== null)
   const added = known.reduce((total, change) => total + (change.added ?? 0), 0)
   const removed = known.reduce((total, change) => total + (change.removed ?? 0), 0)
   const files = changes.length + missed
   const isPartial = known.length < changes.length || missed > 0
-  const counter = files === 0 ? null : s.changes.counter(files, added, removed, isPartial)
+  return files === 0 ? null : ui.s.changes.counter(files, added, removed, isPartial)
+}
 
-  const row = (change: FileChange) =>
-    spread(
-      ui,
-      <Text color="text" wrap="truncate-start">
-        {projectPath(change.path, root)}
-      </Text>,
-      <Text>
-        {change.isNew ? <Text color={theme.accent}>{`${s.changes.isNew} `}</Text> : null}
-        {change.isDeleted ? <Text color={theme.bad}>{`${s.changes.deleted} `}</Text> : null}
-        {change.added === null || change.removed === null ? (
-          <Text dimColor>{s.na}</Text>
-        ) : (
-          <Text>
-            <Text color={theme.done}>{`+${change.added}`}</Text>
-            <Text color={theme.bad}>{` −${change.removed}`}</Text>
-          </Text>
-        )}
-      </Text>,
-    )
+/** A file's row: its path, cut at the start, and its lines. */
+function changeRow(ui: Ui, change: FileChange, root: string): RenderElement {
+  const { Text, theme, s } = ui
+  return spread(
+    ui,
+    <Text color="text" wrap="truncate-start">
+      {projectPath(change.path, root)}
+    </Text>,
+    <Text>
+      {change.isNew ? <Text color={theme.accent}>{`${s.changes.isNew} `}</Text> : null}
+      {change.isDeleted ? <Text color={theme.bad}>{`${s.changes.deleted} `}</Text> : null}
+      {change.added === null || change.removed === null ? (
+        <Text dimColor>{s.na}</Text>
+      ) : (
+        <Text>
+          <Text color={theme.done}>{`+${change.added}`}</Text>
+          <Text color={theme.bad}>{` −${change.removed}`}</Text>
+        </Text>
+      )}
+    </Text>,
+  )
+}
+
+export function changesCard(ui: Ui, changes: readonly FileChange[], missed: number, cacheFiles: number, root: string): RenderElement {
+  const { Text, s } = ui
+  const counter = changesCounter(ui, changes, missed)
+  const row = (change: FileChange) => changeRow(ui, change, root)
 
   // Rows left out for room keep their counts in the counter; files a diff
   // named no lines for are n/a; a Bash command's cache files are only counted.
@@ -2001,4 +2076,349 @@ export function agentsCard(ui: Ui, board: AgentBoard, room: number | null, contr
       {shown}
     </Box>
   )
+}
+
+// ---------------------------------------------------------------- inline
+
+/**
+ * The body rows the pane asks for inline. The engine's frame fits the tree
+ * there, so Live stays at the rows it needs; Changes and Agents may use them.
+ */
+export const INLINE_ROWS = 12
+
+/** STATUS's cells beside CONTEXT: the limit's whole sentence. */
+const INLINE_STATUS_COLUMNS = 34
+/** Between the two columns. */
+const INLINE_GAP = 2
+/** The mini owl and the cell before it. */
+const INLINE_OWL_COLUMNS = MINI_FINE_COLUMNS + 1
+/** The cells CONTEXT keeps beside the owl. */
+const INLINE_CONTEXT_MIN = 33
+/**
+ * The body's columns from which STATUS and CONTEXT stand side by side, 80
+ * of the terminal's (the engine's frame takes 4). CONTEXT keeps its cells
+ * beside the owl from here on, so wherever the two stand side by side the
+ * owl has the width.
+ */
+export const INLINE_WIDE_MIN = INLINE_STATUS_COLUMNS + INLINE_OWL_COLUMNS + INLINE_GAP + INLINE_CONTEXT_MIN
+/** The rows of the side-by-side block the owl needs: its own, and the titles' over them. */
+const INLINE_OWL_BLOCK = MINI_FINE_ROWS + 1
+/** Below these cells beside it the narrow view's bar takes the tokens' place, the share staying. */
+const INLINE_BAR_MIN = 12
+/** Below these cells for its words a plan step's count of the rest loses its word. */
+const INLINE_STEP_MIN = 12
+/** The row of cells the count of hidden rows keeps: a space and `+9`. */
+const INLINE_NOTE_CELLS = 3
+
+const DIM = { dimColor: true } as const
+const BOLD = { bold: true } as const
+const DOTS: Part = { text: ' · ', ...DIM }
+
+/** What an inline tab draws under the title row, and how many of its rows found no room. */
+export type InlineBody = { rows: RenderChildren; hidden: number }
+
+/** The cell after the title: the probe's where it is drawn. */
+const INLINE_SLOT = 1
+const tabCells = (s: Strings) => tabsOf(s).reduce((sum, one) => sum + one.label.length + 2, 0)
+
+/**
+ * Rows the title row takes: one, until the tabs and the count of hidden rows
+ * no longer fit (a terminal under 31 columns), so the count always has a place.
+ */
+export function titleRowsOf(ui: Ui): number {
+  let rows = 1
+  let used = INLINE_SLOT
+  for (const cells of [...tabsOf(ui.s).map(one => one.label.length + 2), INLINE_NOTE_CELLS]) {
+    if (used + cells > ui.width) {
+      rows += 1
+      used = 0
+    }
+    used += cells
+  }
+  return rows
+}
+
+/**
+ * The pane seated inline above the prompt: under 110 columns in the
+ * fullscreen layout, always on the main screen. The engine draws the one
+ * frame there. `noxdeck` and the tabs share a row, then the tab's rows. A
+ * count of what found no room stands at that row's end; where it does not
+ * fit, `noxdeck` gives way, then its word. A probe (`probe`), where given,
+ * sits in the cell after the title: a picture of one transparent pixel, its
+ * alt a blank.
+ */
+export function inlineFrame(ui: Ui, tab: Tab, onTab: (tab: Tab) => void, body: InlineBody, probe: ImageSource | null = null): RenderElement {
+  const { Box, Text, theme, s } = ui
+  const tabs = INLINE_SLOT + tabCells(s)
+  const fits = (title: number, note: string) => title + tabs + (note === '' ? 0 : 1 + cellsOf(note)) <= ui.width
+  const long = body.hidden > 0 ? s.hidden(body.hidden) : ''
+  const note = fits(0, long) ? long : body.hidden > 0 ? `+${body.hidden}` : ''
+  const title = 'noxdeck'
+  const isTitled = fits(title.length, note)
+  const used = tabs + (isTitled ? title.length : 0)
+  return (
+    <Box flexDirection="column" width={ui.width}>
+      <Box flexWrap="wrap">
+        {isTitled ? (
+          <Text bold color={theme.accent}>
+            {title}
+          </Text>
+        ) : null}
+        {probe !== null && ui.Image !== null ? (
+          <Box height={1} width={INLINE_SLOT}>
+            <ui.Image key="probe" source={probe} columns={1} rows={1} alt=" " />
+          </Box>
+        ) : (
+          <Text> </Text>
+        )}
+        {tabsOf(s).map(one => tabButton(ui, one, tab, onTab))}
+        {note === '' ? null : <Text color={theme.accent}>{note.padStart(Math.max(ui.width - used, cellsOf(note) + 1))}</Text>}
+      </Box>
+      {body.rows}
+    </Box>
+  )
+}
+
+/** The state as an inline row says it, in the accent while the person is waited on. */
+function moodPart(ui: Ui, view: StatusView, mood: Mood, room: number): Part {
+  const text = moodWords(ui, mood, view.agentsAtWork, room, true)
+  return isWaitedOn(mood) ? { text, color: ui.theme.accent } : { text, ...DIM }
+}
+
+/** Entries after `lead` while they fit with a count of the rest behind them; the first one cut where it does not fit alone. */
+function countedRow(ui: Ui, lead: readonly Part[], entries: readonly (readonly Part[])[], width: number): RenderElement {
+  const rest = (count: number): Part[] => (count > 0 ? [DOTS, { text: `+${count}`, ...DIM }] : [])
+  let kept = [...lead]
+  let shown = 0
+  for (const entry of entries) {
+    const next = [...kept, ...entry]
+    if (widthOf([...next, ...rest(entries.length - shown - 1)]) > width) break
+    kept = next
+    shown += 1
+  }
+  if (shown > 0) return partsRow(ui, [...kept, ...rest(entries.length - shown)], width)
+  const tail = rest(entries.length - 1)
+  return partsRow(ui, [...fitted([...lead, ...(entries[0] ?? [])], width - widthOf(tail)), ...tail], width)
+}
+
+/** RADAR in one row: its card's rows, then its hotspots one by one, as many as fit, the rest counted. */
+function radarLine(ui: Ui, view: RadarView, width: number): RenderElement {
+  const { s } = ui
+  const { radar, cues, now } = view
+  const title: Part = { text: s.titles.radar, ...BOLD }
+  const entries: Part[][] = repeatedOf(radar).map(failed => [DOTS, { text: s.radar.failedTimes(failed.count, failedLabel(s, failed)), ...DIM }])
+  if (radar.errors > 0 && radar.lastError !== null) {
+    entries.push([DOTS, { text: s.radar.errors(radar.errors, radar.lastError.tool, s.radar.ago(Math.max(0, now - radar.lastError.at))), color: 'text' }])
+  }
+  hotspotsOf(radar).forEach((one, i) => {
+    const name: Part = { text: `${one.name} ${one.count}×`, color: 'text' }
+    entries.push(i === 0 ? [DOTS, { text: `${s.radar.hotspots} `, ...DIM }, name] : [{ text: ', ', ...DIM }, name])
+  })
+  const waited = waitedOf(cues, now)
+  if (cues.approvals > 0 || waited > 0) entries.push([DOTS, { text: s.radar.waited(duration(waited), cues.isWaitApprox, cues.approvals), color: 'text' }])
+  if (entries.length === 0) return partsRow(ui, [title, DOTS, { text: s.radar.empty, ...DIM }], width)
+  return countedRow(ui, [title], entries, width)
+}
+
+/** PLAN in one row: done of all, the first step in the plan's order, the others counted; the step's words give way first. */
+function planLine(ui: Ui, plan: readonly PlanStep[], width: number): RenderElement {
+  const { s } = ui
+  const title: Part = { text: s.titles.plan, ...BOLD }
+  const step = orderedPlan(plan)[0]
+  if (step === undefined) return partsRow(ui, [title, DOTS, { text: s.plan.empty, ...DIM }], width)
+  const { glyph, glyphColor, isDim, isBold } = stepLook(ui, step)
+  const done = plan.filter(one => one.status === 'completed').length
+  const lead: Part[] = [
+    title,
+    { text: ` ${done}/${plan.length}`, ...DIM },
+    DOTS,
+    { text: `${glyph} `, ...(glyphColor === null ? DIM : { color: glyphColor }), ...(isDim ? DIM : {}) },
+  ]
+  const others = plan.length - 1
+  const tail = (text: string): Part[] => (others > 0 ? [DOTS, { text, ...DIM }] : [])
+  const words = tail(s.plan.more(others))
+  const rest = width - widthOf(lead) - widthOf(words) >= INLINE_STEP_MIN ? words : tail(`+${others}`)
+  const label = cutCells(stepLabel(step), Math.max(1, width - widthOf(lead) - widthOf(rest)))
+  return partsRow(ui, [...lead, { text: label, ...(isBold ? BOLD : {}), ...(isDim ? DIM : {}) }, ...rest], width)
+}
+
+/** The loop warning in one row, bold in the accent, the call's name cut so the count shows. */
+function loopLine(ui: Ui, streak: FailStreak, width: number): RenderElement {
+  const { theme, s } = ui
+  const lead = `${s.radar.loop} `
+  const count = ` (${streak.count}×)`
+  const label = cutCells(labelText(s, streak), Math.max(1, width - cellsOf(lead) - cellsOf(count)))
+  return partsRow(ui, [{ text: `${lead}${label}${count}`, color: theme.accent, ...BOLD }], width)
+}
+
+/** What Live draws inline. */
+export type LiveInline = {
+  status: StatusView
+  context: ContextSnapshot | null
+  usage: UsageTrack
+  /** The plan's steps where the session has a todo tool; null: RADAR. */
+  plan: readonly PlanStep[] | null
+  cues: Cues
+}
+
+/** The bottom row: RADAR or PLAN, a loop warning in their place while a call fails again and again. */
+function bottomLine(ui: Ui, view: LiveInline, width: number): { element: RenderElement; isLoop: boolean } {
+  const { status, plan, cues } = view
+  const loop = loopOf(status.radar)
+  if (loop !== null) return { element: loopLine(ui, loop, width), isLoop: true }
+  const element = plan === null ? radarLine(ui, { radar: status.radar, cues, now: status.now }, width) : planLine(ui, plan, width)
+  return { element, isLoop: false }
+}
+
+/** The legend in one row: the largest shares first, `+N` for those that do not fit. */
+function legendRowOf(ui: Ui, context: ContextSnapshot, width: number): RenderElement {
+  const { theme } = ui
+  const items = legendItemsOf(ui, context)
+  const order = context.sources.map((source, i) => ({ source, item: items[i] })).sort((a, b) => b.source.tokens - a.source.tokens)
+  const line = legendLine(order.flatMap(one => (one.item === undefined ? [] : [one.item])), width)
+  const parts = order.slice(0, line.shown).flatMap(({ source, item }, n): Part[] => [
+    ...(n === 0 ? [] : [gap(line.gap)]),
+    { text: '● ', color: sourceColor(theme, source.key, source.color) },
+    { text: `${item?.label ?? source.key} ${item?.value ?? ''}`, ...DIM },
+  ])
+  return partsRow(ui, line.cut > 0 ? [...parts, gap(line.gap), { text: `+${line.cut}`, ...DIM }] : parts, width)
+}
+
+/** CONTEXT beside STATUS: its title and fill, the bar, the legend, the growth, shorter only beside the owl and only where it must be. */
+function contextRows(ui: Ui, context: ContextSnapshot | null, usage: UsageTrack, width: number, isBesideOwl: boolean): RenderElement[] {
+  const { Box, Text, s } = ui
+  const head = (counter: string) => (
+    <Box justifyContent="space-between">
+      <Text bold>{s.titles.context}</Text>
+      <Text dimColor>{counter}</Text>
+    </Box>
+  )
+  if (context === null) return [head(s.na), partsRow(ui, [{ text: s.context.notMeasured, ...DIM }], width)]
+  const { perTurn, compactIn, compactShort } = growthWords(ui, context, usage)
+  const long = `${perTurn} · ${compactIn}`
+  const growth = isBesideOwl && cellsOf(long) > width ? `${perTurn} · ${compactShort}` : long
+  return [
+    head(contextCounter(ui, context).join(' · ')),
+    contextBar(ui, context, width),
+    legendRowOf(ui, context, width),
+    partsRow(ui, [{ text: growth, ...DIM }], width),
+  ]
+}
+
+/**
+ * Live with STATUS and CONTEXT side by side, the bottom row under them, null
+ * where the width or the rows do not hold that. The mini owl stands between
+ * the two where the terminal draws pictures and the block has the rows for it.
+ */
+function liveWide(ui: Ui, view: LiveInline, room: number): (InlineBody & { hasOwl: boolean }) | null {
+  const { Box, Text, s } = ui
+  const { status, context, usage } = view
+  const Picture = ui.Image
+  const pictures = Picture === null ? null : status.pictures
+  const reading = limitReading(ui, status)
+  const statusRows = 2 + (status.limit === null ? 0 : 1) + (reading.reset === null ? 0 : 1)
+  const blockRows = Math.max(statusRows, context === null ? 2 : 4)
+  if (ui.width < INLINE_WIDE_MIN || blockRows + 1 > room) return null
+
+  const hasOwl = Picture !== null && pictures !== null && blockRows >= INLINE_OWL_BLOCK
+  const left = INLINE_STATUS_COLUMNS
+  const right = ui.width - left - INLINE_GAP - (hasOwl ? INLINE_OWL_COLUMNS : 0)
+  const title: Part = { text: s.titles.status, ...BOLD }
+  const mood = moodPart(ui, status, hasOwl ? besideOwl(status) : status.mood, left - cellsOf(title.text) - cellsOf(DOTS.text))
+  const sentence = ` ${reading.sentence}`
+  const words = limitCells(ui, status.limitStyle) + cellsOf(sentence) <= left ? sentence : ` ${reading.leftText}`
+  const block = (
+    <Box>
+      <Box flexDirection="column" flexShrink={0} width={left}>
+        {partsRow(ui, [title, DOTS, mood], left)}
+        {partsRow(ui, [editPart(ui, status.activity)], left)}
+        {limitLineOf(ui, status, reading, words)}
+        {reading.reset === null ? null : partsRow(ui, [{ text: reading.reset, ...DIM }], left)}
+      </Box>
+      {hasOwl ? (
+        <Box flexDirection="column" flexShrink={0} marginLeft={1} marginTop={blockRows - MINI_FINE_ROWS} width={MINI_FINE_COLUMNS}>
+          <Picture key="mini" source={pictures.mini} columns={MINI_FINE_COLUMNS} rows={MINI_FINE_ROWS} alt={s.status.noxAlt} />
+        </Box>
+      ) : null}
+      <Box flexDirection="column" flexShrink={0} marginLeft={INLINE_GAP} width={right}>
+        {contextRows(ui, context, usage, right, hasOwl)}
+      </Box>
+    </Box>
+  )
+  return { rows: [block, bottomLine(ui, view, ui.width).element], hidden: 0, hasOwl }
+}
+
+/** The bar and beside it the fill, the share alone where the tokens would leave the bar too little. */
+function narrowBar(ui: Ui, context: ContextSnapshot, width: number): RenderElement {
+  const { Box, Text } = ui
+  const counter = contextCounter(ui, context)
+  const joined = counter.join(' · ')
+  const words = width - cellsOf(joined) - 1 >= INLINE_BAR_MIN ? joined : (counter[0] ?? '')
+  return (
+    <Box>
+      {contextBar(ui, context, Math.max(1, width - cellsOf(words) - 1))}
+      <Text dimColor>{` ${words}`}</Text>
+    </Box>
+  )
+}
+
+/**
+ * Live in one column, what matters most: the state and the file, the limit
+ * and its reset, the bar, the bottom row. Rows that find no room go from
+ * the bottom and are counted, a loop warning staying while any row does.
+ */
+function liveNarrow(ui: Ui, view: LiveInline, room: number): InlineBody {
+  const { s } = ui
+  const { status, context } = view
+  const width = ui.width
+  const reading = limitReading(ui, status)
+  const reset = reading.reset === null ? '' : ` · ${reading.reset}`
+  const cells = limitCells(ui, status.limitStyle)
+  // The share left is never cut: the sentence gives way first, then the reset.
+  const words = [` ${reading.sentence}${reset}`, ` ${reading.leftText}${reset}`].find(one => cells + cellsOf(one) <= width) ?? ` ${reading.leftText}`
+  const bottom = bottomLine(ui, view, width)
+  const state = partsRow(ui, [moodPart(ui, status, status.mood, width), DOTS, editPart(ui, status.activity)], width)
+  const limit = limitLineOf(ui, status, reading, words)
+  const bar = context === null ? partsRow(ui, [{ text: s.context.notMeasured, ...DIM }], width) : narrowBar(ui, context, width)
+  const rows = [state, limit, bar].filter(row => row !== null)
+  const order = bottom.isLoop ? [bottom.element, ...rows] : [...rows, bottom.element]
+  const kept = new Set(order.slice(0, Math.max(0, room)))
+  return { rows: [...rows, bottom.element].filter(row => kept.has(row)), hidden: order.length - kept.size }
+}
+
+/** The Live tab inline: side by side where that fits, else in one column; `hasOwl`: the drawing holds the mini owl. */
+export function liveInline(ui: Ui, view: LiveInline, room: number): InlineBody & { hasOwl: boolean } {
+  return liveWide(ui, view, room) ?? { ...liveNarrow(ui, view, room), hasOwl: false }
+}
+
+/**
+ * The Changes tab inline: the title and counter in a row, the files that
+ * fit, the last row counting the rest; the lines on files without lines and
+ * cache files in what is left, else in the title row's count.
+ */
+export function changesInline(ui: Ui, changes: readonly FileChange[], missed: number, cacheFiles: number, root: string, room: number): InlineBody {
+  const { s } = ui
+  if (room < 1) return { rows: [], hidden: 1 }
+  const counter = changesCounter(ui, changes, missed)
+  const title: Part = { text: s.titles.changes, ...BOLD }
+  const head = partsRow(ui, counter === null ? [title, DOTS, { text: s.changes.empty, ...DIM }] : [title, gap(2), { text: counter.join(' · '), ...DIM }], ui.width)
+  const lines = [...(missed > 0 ? [s.changes.missed(missed)] : []), ...(cacheFiles > 0 ? [s.changes.cacheFiles(cacheFiles)] : [])]
+  const left = room - 1
+  const isCut = changes.length > left
+  const shown = isCut ? Math.max(0, left - 1) : changes.length
+  const more = isCut && left > 0 ? [partsRow(ui, [{ text: s.changes.moreRows(changes.length - shown), ...DIM }], ui.width)] : []
+  const kept = lines.slice(0, Math.max(0, left - shown - more.length))
+  return {
+    rows: [head, ...changes.slice(0, shown).map(change => changeRow(ui, change, root)), ...more, ...kept.map(line => partsRow(ui, [{ text: line, ...DIM }], ui.width))],
+    hidden: lines.length - kept.length + (isCut && left < 1 ? changes.length : 0),
+  }
+}
+
+/** The Agents tab inline: the compact view, the way back to the main chat over it while its rows leave one for the head. */
+export function agentsInline(ui: Ui, board: AgentBoard, room: number, controls: AgentsControls): InlineBody {
+  if (room < 1) return { rows: [], hidden: 1 }
+  const viewing = viewingRows(ui, board, controls)
+  if (viewing === null) return { rows: agentsCompact(ui, board, room, controls), hidden: 0 }
+  if (viewing.rows >= room) return { rows: agentsCompact(ui, board, room, controls), hidden: 1 }
+  return { rows: [viewing.element, agentsCompact(ui, board, room - viewing.rows, controls)], hidden: 0 }
 }
