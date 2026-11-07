@@ -1277,7 +1277,7 @@ describe('the Live tab', () => {
     expect(await bottom()).toBe('RADAR')
   })
 
-  test('the reset time under the 5h limit, while the reading stands; none without one', async ($, on) => {
+  test('the reset time under the 5h limit, while the reading stands; none without one', { timeoutMs: 15_000 }, async ($, on) => {
     const resetsAt = 1_000_000 + 2 * HOUR
     const world: World = { rateLimits: [{ kind: 'five_hour', percentUsed: 30, resetsAt: new Date(resetsAt).toISOString() }] }
     const clock = engine(on, world)

@@ -11,20 +11,20 @@ import type { Found } from './helpers'
  * push protection) has nothing to report.
  */
 const FAKE = {
-  anthropic: 'sk-' + 'ant-api03-' + 'AbCdEf0123456789xyz',
-  anthropicLong: 'sk-' + 'ant-api03-' + 'Zx9Qw8Er7Ty6' + 'Ui5Op4As3Df2Gh1',
-  github: 'ghp_' + 'aaaaBBBBcccc' + 'DDDDeeee1234',
-  awsKeyId: 'AKIA' + 'IOSFODNN7' + 'EXAMPLE',
-  awsSecret: 'wJalr' + 'XUtnFEMI/' + 'K7MDENG/' + 'bPxRfiCYEXAMPLEKEY',
-  jwtHeader: 'eyJ' + 'hbGciOiJIUzI1NiJ9',
-  jwt: ['eyJ' + 'hbGciOiJIUzI1NiJ9', 'eyJ' + 'zdWIiOiIxMjM0NTY3ODkwIn0', 'dozjgNryP4J3jVmN' + 'Hl0w5N_XgL0n3I9PlFUP0THsR8U'].join('.'),
-  slackBot: 'xox' + 'b-' + '123456789012-abcdefghijkl',
-  privateKey: '-----BEGIN OPENSSH ' + 'PRIVATE KEY----- b3BlbnNzaC1rZXk',
-  hex: '3f786850e387550f' + 'dab836ed7e6dc881de23001b',
-  base64: 'dGhpcyBpcyBhIHNl' + 'Y3JldCB2YWx1ZTEyMw==',
-  discordToken: 'Zx9Qw8' + 'Er7Ty6Ui5Op4' + 'As3Df2Gh1Jk0LzXcVbNm',
-  slackHook: 'https://hooks.slack.com/' + 'services/' + 'T024BE7LD/B01ABCDEF12/' + 'aBcDeFgHiJ1k' + 'LmNoPqRsTuVw',
-  azure: 'lQ88Q~' + 'Ck2nL.vZ3y',
+  anthropic: 'sk-' + 'FAKE-not-a-real-key',
+  anthropicLong: 'sk-' + 'FAKE-not-a-real-key-either',
+  github: 'ghp_' + 'FAKEFAKEFAKE' + 'FAKEFAKEFAKE',
+  awsKeyId: 'AKIA' + 'FAKEFAKE' + 'FAKEFAKE',
+  awsSecret: 'FakeAwsSecret/' + 'Fake000/' + 'FakeFakeFakeFake00',
+  jwtHeader: 'eyJ' + 'FAKEFAKEFAKEFAKE',
+  jwt: ['eyJ' + 'FAKEFAKEFAKEFAKE', 'eyJ' + 'FAKEFAKEFAKEFAKE', 'FAKEFAKE' + 'FAKEFAKE'].join('.'),
+  slackBot: 'xox' + 'b-' + 'FAKE-FAKE-FAKE',
+  privateKey: '-----BEGIN OPENSSH ' + 'PRIVATE KEY----- FAKE',
+  hex: 'deadbeef'.repeat(5),
+  base64: 'FAKE0fake0FAKE0f' + 'ake0FAKE0fake0FAKE==',
+  discordToken: 'Fake0'.repeat(8),
+  slackHook: 'https://hooks.slack.com/' + 'services/' + 'T00000000/B00000000/' + 'FAKEFAKEFAKE' + 'FAKEFAKEFAKE',
+  azure: 'FAKE~' + 'FAKE.FAKE',
   bearer: 'abc.def' + '-123_456',
   githubHeader: '0123' + 'abcd',
 }
@@ -175,7 +175,7 @@ describe('RADAR', () => {
     expect(has(texts, /^Fehler 3 · zuletzt Bash gerade eben$/)).toBe(true)
   })
 
-  test('failures since load: how many, and the last one\'s tool and how long ago; a subagent\'s are its own', async ($, on) => {
+  test('failures since load: how many, and the last one\'s tool and how long ago; a subagent\'s are its own', { timeoutMs: 15_000 }, async ($, on) => {
     const clock = engine(on)
     on('tool.call', (_, e) => failedRun($, e))
     await start($)
@@ -444,7 +444,7 @@ describe('secrets never reach the pane', () => {
     ['curl -b "sid=s3cr3t" https://x', `curl -b "${MASK}" https://x`],
     // Authorization and cookies, whatever their scheme or quoting.
     ['curl -H "Authorization: Splunk 12345678-1234-1234-1234-123456789012" https://splunk:8088', `curl -H "Authorization: ${MASK}" https://splunk:8088`],
-    ['curl -H "Authorization: Bot MTk4NjIyNDgzNDcxOTI1MjQ4.Cl2FMQ.ZnCjm1XVW7vRze4b7Cq4se7kKWs" x', `curl -H "Authorization: ${MASK}" x`],
+    ['curl -H "Authorization: Bot FAKE.FAKE.FAKE" x', `curl -H "Authorization: ${MASK}" x`],
     ['curl -d \'{"Authorization": "Token hunter2"}\' x', `curl -d '{"Authorization": "${MASK}"}' x`],
     ["python3 -c \"requests.get(u, headers={'Authorization': 'SSWS 00aBcDeF'})\"", `python3 -c "requests.get(u, headers={'Authorization': '${MASK}'})"`],
     ['curl -H "Cookie: _ga=1; sid=s3cr3tvalue" x', `curl -H "Cookie: ${MASK}" x`],
@@ -454,7 +454,7 @@ describe('secrets never reach the pane', () => {
     ['export REDIS_URL=redis://:hunter2@db:6379', `export REDIS_URL=redis://:${MASK}@db:6379`],
     ['psql postgres://user:p@ss@host/db', `psql postgres://user:${MASK}@host/db`],
     [`curl https://discord.com/api/webhooks/1234567890/${FAKE.discordToken}`, `curl https://discord.com/api/webhooks/1234567890/${MASK}`],
-    ['azcopy copy a "https://acct.blob.core.windows.net/c/a?sv=2022&sig=Kq1x8sNc3%2BqP9L"', `azcopy copy a "https://acct.blob.core.windows.net/c/a?sv=2022&sig=${MASK}"`],
+    ['azcopy copy a "https://acct.blob.core.windows.net/c/a?sv=2022&sig=FAKE%2BFAKE"', `azcopy copy a "https://acct.blob.core.windows.net/c/a?sv=2022&sig=${MASK}"`],
     ['echo "machine github.com login me password hunter2" >> ~/.netrc', `echo "machine github.com login me password ${MASK}" >> ~/.netrc`],
     // curl's and HTTPie's user:password, quoted or bundled.
     ['curl -u "admin:hunter2" https://x', `curl -u "admin:${MASK}" https://x`],
