@@ -113,6 +113,10 @@ describe('plan', () => {
     task: { id: '2', subject: 'Run every test', description: 'All five files', status: 'completed', blocks: ['3'], blockedBy: ['1'] },
   }
   const NOT_FOUND: BuiltinToolResults['TaskGet'] = { task: null }
+  // Invented: deliberately invalid, answers whose list of tasks is no list.
+  const NO_LIST: readonly unknown[] = [null, 'no tasks', {}, { tasks: 'none' }]
+  // Invented: deliberately invalid, a status a future Claude Code might add.
+  const FUTURE_STATUS = 'archived'
 
   test('a TaskList replaces the plan: its tasks in its order, a known step keeps its running form, the rest is gone', () => {
     expect(planFromTaskList(KNOWN, LISTED)).toEqual([
@@ -161,6 +165,20 @@ describe('plan', () => {
     expect(await found.find({ type: 'Text', text: '2/3' })).toBeDefined()
     expect(await found.find({ type: 'Text', text: 'Run every test' })).toBeDefined()
     await found.unmount()
+  })
+
+  test('an answer without a list of tasks gives no steps, so the plan stays as it is', () => {
+    for (const answer of NO_LIST) expect(planFromTaskList(KNOWN, answer)).toBeNull()
+  })
+
+  test('a TaskList leaves out a task with a status the plan does not know', () => {
+    const listed = { tasks: [...LISTED.tasks, { id: '4', subject: 'Keep for later', status: FUTURE_STATUS, blockedBy: [] }] }
+    expect(planFromTaskList(KNOWN, listed)?.map(step => step.id)).toEqual(['1', '2', '3'])
+  })
+
+  test('a TaskGet with a status the plan does not know leaves the plan as it is', () => {
+    const found = { task: { id: '2', subject: 'Keep for later', description: '', status: FUTURE_STATUS, blocks: [], blockedBy: [] } }
+    expect(planWithTask(KNOWN, found)).toEqual(KNOWN)
   })
 })
 
