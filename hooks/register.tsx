@@ -1222,7 +1222,8 @@ export const register: Register = (on, options) => {
     // Inline the engine's frame is the only one: the tree takes its whole body.
     const isInline = e.props.placement === 'inline'
     const ui = uiOf($.ui.resolve(e), e.surface, theme, s, isInline ? Math.max(8, e.props.bodyColumns) : Math.max(20, e.props.bodyColumns - PANE_INSET), image)
-    const isFine = noxStyle === 'fein' && isTerminal
+    // Inline an owl is the fullscreen layout's alone: on the main screen neither picture nor probe.
+    const isFine = noxStyle === 'fein' && isTerminal && (!isInline || e.viewport?.isFullscreen === true)
     const isPicture = isFine && (await read($, images)) === true
     const probeSource = isFine ? PROBE_SOURCE : null
     if (isTerminal) {

@@ -51,11 +51,11 @@ Aktualisieren: `claude plugin marketplace update noxdeck`, `claude plugin update
 - Das Pane öffnet sich von selbst in Terminals ab 144 Spalten Breite (das Vollbild-Layout dockt es neben dem Transkript an).
 - `/noxdeck` öffnet es bei jeder Breite; `/noxdeck live`, `/noxdeck changes` und `/noxdeck agents` öffnen es auf diesem Tab.
 - Einen Tab anklicken, oder das Pane fokussieren (ctrl+x tab) und Tab und Enter benutzen.
-- Inline über dem Prompt (im Vollbild-Layout unter 110 Spalten, auf dem Main-Screen immer, etwa in tmux) nimmt das Pane wenig Höhe: Titel und Tabs in einer Zeile, ab 80 Spalten STATUS und CONTEXT nebeneinander, mit der Mini-Eule, wo das Terminal Bilder zeichnet, und RADAR oder PLAN als eine Zeile; schmaler Status, Limit, Kontext-Balken und eine RADAR-Zeile. Was keinen Platz findet, wird gezählt, nie still abgeschnitten.
+- Inline über dem Prompt (im Vollbild-Layout unter 110 Spalten, auf dem Main-Screen immer, etwa in tmux) nimmt das Pane wenig Höhe: Titel und Tabs in einer Zeile, ab 80 Spalten STATUS und CONTEXT nebeneinander, im Vollbild-Layout mit der Mini-Eule, wo das Terminal Bilder zeichnet, und RADAR oder PLAN als eine Zeile; schmaler Status, Limit, Kontext-Balken und eine RADAR-Zeile. Was keinen Platz findet, wird gezählt, nie still abgeschnitten.
 
 ## Getestet mit
 
-Claude Code 2.1.312. Die Mod-API ist Early Access und kann sich zwischen Releases ändern.
+Claude Code 2.1.319. Die Mod-API ist Early Access und kann sich zwischen Releases ändern.
 
 ## Einstellungen
 

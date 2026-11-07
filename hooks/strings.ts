@@ -66,6 +66,8 @@ export type Strings = {
     notMeasured: string
     perTurn: (signed: string) => string
     perTurnNA: string
+    /** The same beside the owl, where the long line does not fit. */
+    perTurnShort: (signed: string) => string
     compactIn: (turns: number) => string
     compactOff: string
     compactDue: string
@@ -229,6 +231,7 @@ const de: Strings = {
     notMeasured: 'Context noch nicht gemessen',
     perTurn: signed => `Ø ${signed}/Turn`,
     perTurnNA: 'Ø n/a/Turn',
+    perTurnShort: signed => `Ø ${signed}/Turn`,
     compactIn: turns => `Auto-Compact in ~${turns} ${turns === 1 ? 'Turn' : 'Turns'}`,
     compactOff: 'Auto-Compact aus',
     compactDue: 'Auto-Compact fällig',
@@ -386,6 +389,7 @@ const en: Strings = {
     notMeasured: 'Context not measured yet',
     perTurn: signed => `avg ${signed}/Turn`,
     perTurnNA: 'avg n/a/Turn',
+    perTurnShort: signed => `${signed}/Turn`,
     compactIn: turns => `Auto-Compact in ~${turns} ${turns === 1 ? 'Turn' : 'Turns'}`,
     compactOff: 'Auto-Compact off',
     compactDue: 'Auto-Compact due',

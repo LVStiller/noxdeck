@@ -13,10 +13,15 @@ import type { World } from './helpers'
 
 const FRAME_COLUMNS = 4
 
-/** The pane inline in a terminal of `terminal` columns, its body `rows` rows high. */
-const inline = (terminal: number, rows = 12) => ({
+/**
+ * The pane inline in a terminal of `terminal` columns, its body `rows` rows
+ * high: in the fullscreen layout unless told otherwise, as the engine's
+ * `e.viewport` says it.
+ */
+const inline = (terminal: number, rows = 12, isFullscreen = true) => ({
   ...PANE,
   props: { ...PANE.props, placement: 'inline' as const, bodyColumns: terminal - FRAME_COLUMNS, scroll: { offset: 0, bodyRows: rows } },
+  viewport: { columns: terminal, rows: 40, isFullscreen },
 })
 
 type Node = string | { type: string; props?: Record<string, unknown>; children?: readonly Node[] }
@@ -94,8 +99,8 @@ async function rowsOf(ui: Mounted, terminal: number, bodyRows: number): Promise<
 }
 
 /** The pane's rows on the Live tab, bars as `[n]` for their cells. */
-async function live($: Engine, terminal: number, bodyRows = 12): Promise<string[]> {
-  const ui = await $.ui.mount({ ...inline(terminal, bodyRows), surface: 'terminal' })
+async function live($: Engine, terminal: number, bodyRows = 12, isFullscreen = true): Promise<string[]> {
+  const ui = await $.ui.mount({ ...inline(terminal, bodyRows, isFullscreen), surface: 'terminal' })
   const rows = await rowsOf(ui, terminal, bodyRows)
   await ui.unmount()
   return rows.map(row => row.replace(/[█│]{2,}/, bar => `[${bar.length}]`))
@@ -124,7 +129,7 @@ const GROWTH_SHORT = 'Ø +14k/Turn · Compact ~4 Turns'
  * The first drawing holds the probe, the first tick blits it, so the terminal
  * has answered whether it draws pictures.
  */
-async function session($: Engine, on: On, world: World = {}) {
+async function session($: Engine, on: On, world: World = {}, isFullscreen = true) {
   const limits = world.rateLimits ?? [WEEK]
   const clock = engine(on, { messages: [76 * K, 76 * K, 62 * K, 76 * K], ...world, rateLimits: limits })
   on('tool.call', (_, e) => {
@@ -137,7 +142,7 @@ async function session($: Engine, on: On, world: World = {}) {
   for (const turnId of ['t1', 't2']) await $.turn.complete({ turnId, answer: '', durationMs: 1, isAborted: false, reason: 'answer' })
   await $.turn.start({ text: '', turnId: 't3' })
   await $.tool.call({ tool: 'Edit', file_path: '/proj/hooks/view.tsx', old_string: 'a', new_string: 'b' })
-  const ui = await $.ui.mount({ ...inline(100), surface: 'terminal' })
+  const ui = await $.ui.mount({ ...inline(100, 12, isFullscreen), surface: 'terminal' })
   await ui.unmount()
   await clock.advance(1000)
   return clock
@@ -151,14 +156,26 @@ const loop = async ($: Engine) => {
 describe('the inline view at real widths', () => {
   for (const [name, limit] of LIMITS) {
     for (const [picture, world] of [['pictures', PICTURES], ['no pictures', {}]] as const) {
-      test(`every width with ${name} and ${picture}: side by side from 80 columns, the owl only there and only with pictures`, async ($, on) => {
+      test(`every fullscreen width with ${name} and ${picture}: side by side from 80 columns, the owl only there and only with pictures`, async ($, on) => {
         await session($, on, { ...world, rateLimits: [limit] })
-        for (const terminal of [36, 40, 49, 50, 60, 79, 80, 99, 100, 109, 120, 200]) {
+        for (const terminal of [36, 40, 49, 50, 60, 79, 80, 99, 100, 109]) {
           const ui = await $.ui.mount({ ...inline(terminal), surface: 'terminal' })
           const rows = await rowsOf(ui, terminal, 12)
           const owls = (await ui.findAll({ type: 'Image' })).filter(image => image.props.alt !== ' ')
           await ui.unmount()
           expect([terminal, rows.length, owls.length]).toEqual([terminal, terminal >= 80 ? 6 : 5, terminal >= 80 && picture === 'pictures' ? 1 : 0])
+          expect(rows[0]).toBe(TITLE)
+        }
+      })
+
+      test(`every main-screen width with ${name} and ${picture}: the same rows, never an owl`, async ($, on) => {
+        await session($, on, { ...world, rateLimits: [limit] }, false)
+        for (const terminal of [36, 40, 49, 50, 60, 79, 80, 99, 100, 109, 120, 160, 200]) {
+          const ui = await $.ui.mount({ ...inline(terminal, 12, false), surface: 'terminal' })
+          const rows = await rowsOf(ui, terminal, 12)
+          const images = await ui.findAll({ type: 'Image' })
+          await ui.unmount()
+          expect([terminal, rows.length, images.length]).toEqual([terminal, terminal >= 80 ? 6 : 5, 0])
           expect(rows[0]).toBe(TITLE)
         }
       })
@@ -197,6 +214,23 @@ describe('the inline view at real widths', () => {
       `${beside('Reset Mi 00:00', 35, '▒▒▒▒▒▒  ')}${GROWTH_SHORT}`,
       RADAR,
     ])
+  })
+
+  // Two digits of each, as the mockup: 4.2k a turn, 13 to go, the widest of what a 200k window shows.
+  const WIDEST: World = { ...PICTURES, messages: [76 * K, 76 * K, 71.8 * K, 76 * K] }
+
+  test('beside the owl the short growth fits CONTEXT\'s 33 cells whole', async ($, on) => {
+    await session($, on, WIDEST)
+    const growth = (await live($, 80))[4]?.slice(43)
+    expect(growth).toBe('Ø +4,2k/Turn · Compact ~13 Turns')
+    expect(cellsOf(growth ?? '')).toBeLessThanOrEqual(33)
+  })
+
+  test('in English too: the short growth fits CONTEXT\'s 33 cells whole', { options: { language: 'en' } }, async ($, on) => {
+    await session($, on, WIDEST)
+    const growth = (await live($, 80))[4]?.slice(43)
+    expect(growth).toBe('+4.2k/Turn · Compact ~13 Turns')
+    expect(cellsOf(growth ?? '')).toBeLessThanOrEqual(33)
   })
 
   test('the short growth is the owl\'s alone: without it a line too long is cut', { options: { language: 'en' } }, async ($, on) => {
@@ -258,7 +292,7 @@ describe('the inline view at real widths', () => {
     await session($, on, PICTURES)
     expect((await live($, 60))[1]).toBe('working · ✎ Editing view.tsx')
     expect((await live($, 60))[2]).toBe(`${HEARTS}  week · 67% left · Reset Wed 00:00`)
-    expect((await live($, 80))[4]).toBe(`${beside('Reset Wed 00:00', 35, '▒▒▒▒▒▒  ')}avg +14k/Turn · Compact ~4 Turns`)
+    expect((await live($, 80))[4]).toBe(`${beside('Reset Wed 00:00', 35, '▒▒▒▒▒▒  ')}+14k/Turn · Compact ~4 Turns`)
     expect((await live($, 60, 3))[0]).toBe(`${TITLE}${'+2 hidden'.padStart(56 - TITLE.length)}`)
   })
 
@@ -274,6 +308,28 @@ describe('the owl inline', () => {
   test('it needs pictures: the block owl does not stand in', async ($, on) => {
     await session($, on)
     expect((await live($, 100)).join('\n')).not.toMatch(/▒|[▀▄]/)
+  })
+
+  test('on the main screen it stays out, though the terminal draws pictures: CONTEXT keeps its cells, the long growth stands', async ($, on) => {
+    await session($, on, PICTURES)
+    const rows = await live($, 80, 12, false)
+    expect(rows.join('\n')).not.toContain('▒')
+    expect(rows[2]).toBe(beside('✎ bearbeitet view.tsx', 36, '[40]'))
+    expect(rows[4]).toBe(beside('Reset Mi 00:00', 36, GROWTH))
+  })
+
+  test('a session on the main screen draws no probe and blits none', async ($, on) => {
+    const blits: NonNullable<World['blits']> = []
+    await session($, on, { ...PICTURES, blits }, false)
+    expect(blits).toEqual([])
+  })
+
+  test('where the surface has not said which layout it is, no owl', async ($, on) => {
+    await session($, on, PICTURES)
+    const { viewport: _, ...unmeasured } = inline(100)
+    const ui = await $.ui.mount({ ...unmeasured, surface: 'terminal' })
+    expect((await ui.findAll({ type: 'Image' })).length).toBe(0)
+    await ui.unmount()
   })
 
   test('the style without pictures has none', { options: { noxStyle: 'klassisch' } }, async ($, on) => {

@@ -51,11 +51,11 @@ To update: `claude plugin marketplace update noxdeck`, `claude plugin update nox
 - The pane opens by itself on terminals 144 columns or wider (the fullscreen layout docks it beside the transcript).
 - `/noxdeck` opens it at any width; `/noxdeck live`, `/noxdeck changes` and `/noxdeck agents` open it on that tab.
 - Click a tab, or focus the pane (ctrl+x tab) and use Tab and Enter.
-- Inline above the prompt (the fullscreen layout under 110 columns, the main screen always, as in tmux) the pane takes little height: title and tabs in one row, from 80 columns STATUS and CONTEXT side by side, with the mini owl where the terminal draws pictures, and RADAR or PLAN in one row; narrower, the state, the limit, the context bar and one RADAR row. What finds no room is counted, never cut off silently.
+- Inline above the prompt (the fullscreen layout under 110 columns, the main screen always, as in tmux) the pane takes little height: title and tabs in one row, from 80 columns STATUS and CONTEXT side by side, in the fullscreen layout with the mini owl where the terminal draws pictures, and RADAR or PLAN in one row; narrower, the state, the limit, the context bar and one RADAR row. What finds no room is counted, never cut off silently.
 
 ## Tested with
 
-Claude Code 2.1.312. The mod API is early access and may change between releases.
+Claude Code 2.1.319. The mod API is early access and may change between releases.
 
 ## Settings
 

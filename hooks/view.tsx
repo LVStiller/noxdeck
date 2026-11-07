@@ -579,18 +579,23 @@ function legendItemsOf(ui: Ui, context: ContextSnapshot): LegendItem[] {
 const contextTokens = (context: ContextSnapshot) => context.exact?.tokens ?? context.totalTokens
 
 /** The growth per turn and how far auto-compaction is, in words and shorter. */
-function growthWords(ui: Ui, context: ContextSnapshot, usage: UsageTrack): { perTurn: string; compactIn: string; compactShort: string } {
+function growthWords(ui: Ui, context: ContextSnapshot, usage: UsageTrack): { perTurn: string; compactIn: string; short: string } {
   const { s } = ui
   const current = contextTokens(context)
   const growth = growthOf(usage.history, current, context.threshold)
-  const perTurn =
-    growth.perTurn === null
-      ? s.context.perTurnNA
-      : s.context.perTurn(`${growth.perTurn < 0 ? '−' : '+'}${tokens(ui, Math.abs(growth.perTurn))}`)
-  if (context.threshold === null) return { perTurn, compactIn: s.context.compactOff, compactShort: s.context.compactShort.off }
-  if (current >= context.threshold) return { perTurn, compactIn: s.context.compactDue, compactShort: s.context.compactShort.due }
-  if (growth.turnsLeft === null) return { perTurn, compactIn: s.context.compactNA, compactShort: s.context.compactShort.na }
-  return { perTurn, compactIn: s.context.compactIn(growth.turnsLeft), compactShort: s.context.compactShort.in(growth.turnsLeft) }
+  const signed = growth.perTurn === null ? null : `${growth.perTurn < 0 ? '−' : '+'}${tokens(ui, Math.abs(growth.perTurn))}`
+  const perTurn = signed === null ? s.context.perTurnNA : s.context.perTurn(signed)
+  const perTurnShort = signed === null ? s.context.perTurnNA : s.context.perTurnShort(signed)
+  const { compactShort } = s.context
+  const [compactIn, shortly] =
+    context.threshold === null
+      ? [s.context.compactOff, compactShort.off]
+      : current >= context.threshold
+        ? [s.context.compactDue, compactShort.due]
+        : growth.turnsLeft === null
+          ? [s.context.compactNA, compactShort.na]
+          : [s.context.compactIn(growth.turnsLeft), compactShort.in(growth.turnsLeft)]
+  return { perTurn, compactIn, short: `${perTurnShort} · ${shortly}` }
 }
 
 export function contextCard(ui: Ui, context: ContextSnapshot | null, usage: UsageTrack): Drawn {
@@ -2294,9 +2299,9 @@ function contextRows(ui: Ui, context: ContextSnapshot | null, usage: UsageTrack,
     </Box>
   )
   if (context === null) return [head(s.na), partsRow(ui, [{ text: s.context.notMeasured, ...DIM }], width)]
-  const { perTurn, compactIn, compactShort } = growthWords(ui, context, usage)
+  const { perTurn, compactIn, short } = growthWords(ui, context, usage)
   const long = `${perTurn} · ${compactIn}`
-  const growth = isBesideOwl && cellsOf(long) > width ? `${perTurn} · ${compactShort}` : long
+  const growth = isBesideOwl && cellsOf(long) > width ? short : long
   return [
     head(contextCounter(ui, context).join(' · ')),
     contextBar(ui, context, width),
@@ -2308,7 +2313,8 @@ function contextRows(ui: Ui, context: ContextSnapshot | null, usage: UsageTrack,
 /**
  * Live with STATUS and CONTEXT side by side, the bottom row under them, null
  * where the width or the rows do not hold that. The mini owl stands between
- * the two where the terminal draws pictures and the block has the rows for it.
+ * the two where the view brings pictures (the fullscreen layout, a terminal
+ * that draws them) and the block has the rows for it.
  */
 function liveWide(ui: Ui, view: LiveInline, room: number): (InlineBody & { hasOwl: boolean }) | null {
   const { Box, Text, s } = ui
