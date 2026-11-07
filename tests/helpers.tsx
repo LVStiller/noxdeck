@@ -11,7 +11,7 @@
 
 import { mock, test as kitTest } from 'claude-code/testing'
 import type { Engine, TestRest } from 'claude-code/testing'
-import type { AgentInfo, ContextWindowSource, On, SessionContextBreakdown, SessionRateLimit, ImageBlitArgs, UiBlitResult } from 'claude-code'
+import type { AgentInfo, ContextWindowSource, On, PaneOpenArgs, SessionContextBreakdown, SessionRateLimit, ImageBlitArgs, UiBlitResult } from 'claude-code'
 import { FRAME_MS, mascotRows, MINI_ROWS, miniRows, STILL, gridOf } from '../hooks/mascot'
 import { themeOf } from '../hooks/themes'
 import type { MascotFrame, MiniFrame, MiniPose, Pose } from '../types'
@@ -126,6 +126,8 @@ export type World = {
   images?: 'ok' | 'alt' | 'tmux' | 'tmuxFix' | 'gone'
   /** Every blit, with the clock's time: pushed to when given. */
   blits?: (ImageBlitArgs & { at: number })[]
+  /** What every `$.ui.open` asked for: pushed to when given. */
+  opened?: PaneOpenArgs[]
   /** Claude Code's Reduce motion setting. */
   isMotionReduced?: boolean
 }
@@ -148,7 +150,10 @@ export function engine(on: On, world: World = {}) {
   let measured = 0
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', () => ({ value: { command: 'noxdeck' } }))
-  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.open', (_, e) => {
+    world.opened?.push(e)
+    return { value: { isPlaced: true } }
+  })
   on('ui.panes', () => ({
     value:
       world.pane === 'closed'

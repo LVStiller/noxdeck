@@ -68,16 +68,22 @@ import { themeOf } from './themes'
 import {
   agentsAtWorkOf,
   agentsCard,
+  agentsInline,
   changesCard,
+  changesInline,
   contextCard,
   frame,
   frameRows,
+  INLINE_ROWS,
+  inlineFrame,
+  liveInline,
   MINI_MIN_COLUMNS,
   moodOf,
   PANE_INSET,
   planCard,
   radarCard,
   statusCard,
+  titleRowsOf,
   uiOf,
 } from './view'
 import type { LimitStyle, Owl, OwlPictures } from './view'
@@ -636,7 +642,7 @@ async function wornCostume($: EngineInterface): Promise<NoxCostume> {
 }
 
 function openPane($: EngineInterface) {
-  return $.ui.open({ id: PANE, title: 'noxdeck', columns: 52 })
+  return $.ui.open({ id: PANE, title: 'noxdeck', columns: 52, rows: INLINE_ROWS })
 }
 
 /** A refusal as the toast shows it: its first line, cut short. */
@@ -1213,8 +1219,11 @@ export const register: Register = (on, options) => {
     // and the fine owls once the probe has learned that pictures are drawn.
     const isTerminal = e.surface === 'terminal'
     const image = e.surface === 'terminal' ? $.ui.resolve(e).Image : null
-    const ui = uiOf($.ui.resolve(e), e.surface, theme, s, Math.max(20, e.props.bodyColumns - PANE_INSET), image)
-    const isFine = noxStyle === 'fein' && isTerminal
+    // Inline the engine's frame is the only one: the tree takes its whole body.
+    const isInline = e.props.placement === 'inline'
+    const ui = uiOf($.ui.resolve(e), e.surface, theme, s, isInline ? Math.max(8, e.props.bodyColumns) : Math.max(20, e.props.bodyColumns - PANE_INSET), image)
+    // Inline an owl is the fullscreen layout's alone: on the main screen neither picture nor probe.
+    const isFine = noxStyle === 'fein' && isTerminal && (!isInline || e.viewport?.isFullscreen === true)
     const isPicture = isFine && (await read($, images)) === true
     const probeSource = isFine ? PROBE_SOURCE : null
     if (isTerminal) {
@@ -1224,6 +1233,7 @@ export const register: Register = (on, options) => {
     // A tab an older version stored under another name (`plan`) is Live.
     const stored = await read($, tab)
     const shown: Tab = stored === 'changes' || stored === 'agents' ? stored : 'live'
+    const inlineRoom = e.props.scroll.bodyRows - titleRowsOf(ui)
     // The Agents tab opens on a fresh snapshot; while it shows, the tick writes one at most once a second.
     const onTab = (to: Tab) =>
       void (async () => {
@@ -1233,7 +1243,11 @@ export const register: Register = (on, options) => {
 
     if (shown === 'changes') {
       const cacheFiles = hiddenCount(await read($, hiddenFiles))
-      return frame(ui, shown, onTab, changesCard(ui, await read($, changes), await read($, missedFiles), cacheFiles, await read($, root)), probeSource)
+      const files = await read($, changes)
+      const missed = await read($, missedFiles)
+      const at = await read($, root)
+      if (isInline) return inlineFrame(ui, shown, onTab, changesInline(ui, files, missed, cacheFiles, at, inlineRoom), probeSource)
+      return frame(ui, shown, onTab, changesCard(ui, files, missed, cacheFiles, at), probeSource)
     }
     if (shown === 'agents') {
       // The snapshot alone: the tab redraws at most once a second. The full
@@ -1250,7 +1264,9 @@ export const register: Register = (on, options) => {
         isProcessedOpen: await read($, isProcessedOpen),
         onProcessed: () => void quietly(() => update($, isProcessedOpen, isOpen => !isOpen)),
       }
-      return frame(ui, shown, onTab, agentsCard(ui, await read($, agentBoard), room, controls), probeSource)
+      const board = await read($, agentBoard)
+      if (isInline) return inlineFrame(ui, shown, onTab, agentsInline(ui, board, inlineRoom, controls), probeSource)
+      return frame(ui, shown, onTab, agentsCard(ui, board, room, controls), probeSource)
     }
 
     // Live: STATUS on top, CONTEXT, then RADAR (PLAN where the session has a todo tool).
@@ -1282,6 +1298,11 @@ export const register: Register = (on, options) => {
     }
     const todo = await read($, todoTools)
     const steps = todo.isListed || todo.isUsed ? await read($, plan) : null
+    if (isInline) {
+      const live = liveInline(ui, { status: statusView, context: await read($, context), usage: await read($, usage), plan: steps, cues: asked }, inlineRoom)
+      if (isTerminal && pictures !== null && live.hasOwl) fineShown = { owl: 'mini', source: pictures.mini }
+      return inlineFrame(ui, shown, onTab, live, probeSource)
+    }
     const bottom = (maxRows: number | null) =>
       steps === null ? radarCard(ui, { radar: found, cues: asked, now: at }, maxRows) : planCard(ui, steps, maxRows)
     const measured = contextCard(ui, await read($, context), await read($, usage))
