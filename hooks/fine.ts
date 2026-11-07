@@ -350,7 +350,7 @@ const restsWithDrop = (look: Look) => calmDropOf(look, 'ruhe') !== null
 const stepOf = (at: number) => Math.floor(at / FINE_FRAME_MS) * FINE_FRAME_MS
 /** The step a looping run of `steps` steps is on at `at`, on the clock. */
 const step = (at: number, steps: number) => ((Math.floor(at / FINE_FRAME_MS) % steps) + steps) % steps
-const since = (at: number, then: number | null) => (then === null ? Number.POSITIVE_INFINITY : at - then)
+const since = (at: number, from: number | null) => (from === null ? Number.POSITIVE_INFINITY : at - from)
 
 /** What the scene shows at `at`, and since when a state that answers an event runs (null: on the clock). */
 type Shown = { state: NoxState; from: number | null }

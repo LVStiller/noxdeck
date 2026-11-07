@@ -352,21 +352,28 @@ export function exactOf(usage: SessionContextUsage): ExactFill | null {
   return { tokens: usage.tokens, window: usage.window, percent: usage.percent }
 }
 
-export function fiveHourOf(limits: readonly SessionRateLimit[]): RateWindow | null {
-  const window = limits.find(limit => limit.kind === 'five_hour')
-  return window ? { percentUsed: window.percentUsed, resetsAt: window.resetsAt ?? null } : null
+/**
+ * The window STATUS shows: the 5h one where the account has it, else the
+ * week's for all models (Ultra has no 5h limit); null without either. A
+ * gateway's `spend_limit` is never shown.
+ */
+export function limitOf(limits: readonly SessionRateLimit[]): RateWindow | null {
+  const window = limits.find(limit => limit.kind === 'five_hour') ?? limits.find(limit => limit.kind === 'seven_day')
+  if (window === undefined) return null
+  const kind = window.kind === 'five_hour' ? 'five_hour' : 'seven_day'
+  return { kind, percentUsed: window.percentUsed, resetsAt: window.resetsAt ?? null }
 }
 
-/** Whether the 5h reading's reset time has passed: the reading no longer stands. */
-export function hasLimitReset(fiveHour: RateWindow | null, now: number): boolean {
-  const resetsAt = fiveHour?.resetsAt ? Date.parse(fiveHour.resetsAt) : Number.NaN
-  return fiveHour !== null && Number.isFinite(resetsAt) && now > 0 && now >= resetsAt
+/** Whether the reading's reset time has passed: the reading no longer stands. */
+export function hasLimitReset(limit: RateWindow | null, now: number): boolean {
+  const resetsAt = limit?.resetsAt ? Date.parse(limit.resetsAt) : Number.NaN
+  return limit !== null && Number.isFinite(resetsAt) && now > 0 && now >= resetsAt
 }
 
-/** The share of the 5h window left, 0 to 100; null without a reading that still stands. */
-export function limitLeft(fiveHour: RateWindow | null, now: number): number | null {
-  if (fiveHour === null || hasLimitReset(fiveHour, now)) return null
-  return Math.max(0, Math.min(100, 100 - fiveHour.percentUsed))
+/** The share of the window left, 0 to 100; null without a reading that still stands. */
+export function limitLeft(limit: RateWindow | null, now: number): number | null {
+  if (limit === null || hasLimitReset(limit, now)) return null
+  return Math.max(0, Math.min(100, 100 - limit.percentUsed))
 }
 
 /** How full the window is, in percent: measured when it was, else the breakdown's estimate. */

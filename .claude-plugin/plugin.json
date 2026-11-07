@@ -1,7 +1,7 @@
 {
   "name": "noxdeck",
   "displayName": "noxdeck",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "A retro terminal dashboard pane for Claude Code: context window, subagents, changed files and a radar for loops, with Nox the pixel owl. Observes only.",
   "author": {
     "name": "Luis Vincent Stiller",
@@ -46,8 +46,8 @@
     },
     "limitStyle": {
       "type": "string",
-      "title": "5h limit",
-      "description": "How the STATUS card draws the 5h limit: five hearts (hearts) or a ten-cell bar (bar).",
+      "title": "Limit style",
+      "description": "How the STATUS card draws the usage limit it shows (the 5h limit, or where the account has none the weekly limit for all models): five hearts (hearts) or a ten-cell bar (bar).",
       "options": [
         "hearts",
         "bar"

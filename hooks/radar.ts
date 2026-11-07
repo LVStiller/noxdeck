@@ -270,10 +270,16 @@ export const waitedOf = (cues: Cues, at: number): number =>
 
 // ---------------------------------------------------------------- reset
 
-/** The 5h window's reset as a clock time of the day (`18:40`), in the machine's time zone. */
+/** A window's reset as a clock time of the day (`18:40`), in the machine's time zone. */
 export function resetClockOf(resetsAt: string | null): string | null {
   const at = resetsAt ? Date.parse(resetsAt) : Number.NaN
   if (!Number.isFinite(at)) return null
   const time = new Date(at)
   return `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`
+}
+
+/** The weekday a window resets on, 0 (Sunday) to 6 as `Date#getDay` counts, in the machine's time zone. */
+export function resetDayOf(resetsAt: string | null): number | null {
+  const at = resetsAt ? Date.parse(resetsAt) : Number.NaN
+  return Number.isFinite(at) ? new Date(at).getDay() : null
 }

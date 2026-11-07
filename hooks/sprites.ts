@@ -10,7 +10,7 @@
 // `3.DMD20.DMD3.` is `...DMD....................DMD...`), one to a line, and
 // each frame is a line of its rows' numbers, two characters each (DIGITS,
 // base 64). Unpacked when the module loads, every frame is its grid again,
-// character for character: tests/noxdeck.test.tsx compares the SHA-256 of the
+// character for character: tests/fine.test.tsx compares the SHA-256 of the
 // frames and times with a recorded one. hooks/fine.ts picks, times and colors them.
 
 import type { NoxCostume, NoxState } from '../types'
