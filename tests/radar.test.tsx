@@ -27,6 +27,7 @@ const FAKE = {
   azure: 'FAKE~' + 'FAKE.FAKE',
   bearer: 'abc.def' + '-123_456',
   githubHeader: '0123' + 'abcd',
+  urlToken: 'FAKE-' + 'not-a-token',
 }
 
 describe('RADAR', () => {
@@ -486,6 +487,20 @@ describe('secrets never reach the pane', () => {
 
   test('everything that looks like a token, key, password or secret is masked', () => {
     for (const [raw, shown] of MASKED) expect(maskSecrets(raw)).toBe(shown)
+  })
+
+  // Each line gives one rule alone something to go on: no credential's name, no
+  // long run. So each of these fails alone when its rule is gone.
+  test('a GitHub token is masked by its form alone', () => {
+    expect(maskSecrets(`deploy ${FAKE.github} now`)).toBe(`deploy ${MASK} now`)
+  })
+
+  test('an AWS key id is masked by its form alone', () => {
+    expect(maskSecrets(`echo ${FAKE.awsKeyId}`)).toBe(`echo ${MASK}`)
+  })
+
+  test('a token before the @ of a URL is masked by its place alone', () => {
+    expect(maskSecrets(`git clone https://${FAKE.urlToken}@example.com/acme/app`)).toBe(`git clone https://${MASK}@example.com/acme/app`)
   })
 
   const KEPT_AS_IS = [
