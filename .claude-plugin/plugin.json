@@ -1,7 +1,7 @@
 {
   "name": "noxdeck",
   "displayName": "noxdeck",
-  "version": "1.0.9",
+  "version": "1.1.0",
   "description": "A retro terminal dashboard pane for Claude Code: context window, subagents, changed files and a radar for loops, with Nox the pixel owl. Observes only.",
   "author": {
     "name": "Luis Vincent Stiller",

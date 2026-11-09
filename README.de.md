@@ -27,7 +27,7 @@ Ein Mod für Claude Code: ein Retro-Terminal-Dashboard in einem Pane neben dem T
   - **CONTEXT**: wie voll das Kontextfenster ist, nach Quelle (Nachrichten, MCP, Tools, Memory, Skills, System), ein Verlauf, das Wachstum pro Turn, die Cache-Trefferquote und wie viel bis zur automatischen Kompaktierung bleibt.
   - **RADAR**: derselbe Aufruf, der wieder und wieder scheitert, die Fehler seit dem Laden, die am häufigsten gelesenen oder bearbeiteten Dateien (Hotspots) und wie lange Freigabedialoge auf dich gewartet haben. Solange die Sitzung ein Todo-Tool hat, steht an seiner Stelle **PLAN** mit Claudes Todo-Liste.
 - **Changes**: die in dieser Sitzung geänderten Dateien mit hinzugefügten und entfernten Zeilen, jede mit ihrem Pfad ab dem Projektordner. Cache- und Build-Dateien, die ein Bash-Befehl nebenbei erzeugt (in `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `node_modules`, `.venv` oder `.git`, `*.pyc`, `*.pyo`, `.DS_Store`), werden unter der Liste gezählt, nicht aufgeführt; ein Edit oder Write dort steht immer in der Liste.
-- **Agents**: was Haupt-Chat, Subagents und andere Schleifen seit dem Laden verarbeitet haben, Modell, Tokens und aktuelle Tätigkeit jedes Subagents, in Gruppen, die sich zuklappen lassen, und eine Zeitleiste. Ein Druck auf die Zeile eines Agents zeigt sein Transkript in der Hauptansicht.
+- **Agents**: was Haupt-Chat, Subagents und andere Schleifen seit dem Laden verarbeitet haben, Modell, Tokens und aktuelle Tätigkeit jedes Subagents, in Gruppen, die sich zuklappen lassen, und eine Zeitleiste. Die Agents eines Workflows stehen unter ihrem Lauf, eine Zeile je Lauf mit Name, Agents, Tokens und Dauer; laufende Agents zeigen sich immer einzeln mit ihrer Tätigkeit; ältere Läufe, die nicht mehr passen, fasst eine Zeile zusammen. Der Kopf zählt jeden Agent seit dem Laden. Ein Druck auf die Zeile eines Agents zeigt sein Transkript in der Hauptansicht.
 
 Nox ist ein Pixelbild, wo das Terminal Bilder zeichnet (Ghostty, kitty; iTerm2 ab 3.5 mit Vollbild-Rendering; tmux mit eingeschaltetem `allow-passthrough` und `focus-events`), und überall sonst aus Blockzeichen. Nox liest, schreibt, arbeitet in der Shell, denkt nach, winkt, wenn ein Subagent startet, wartet auf dich, freut sich, wenn der Turn fertig ist, erschrickt bei einem Fehler, warnt vor einer Schleife, schwitzt, wenn der Kontext voll wird, wird müde, wenn das Limit, das STATUS zeigt, knapp wird (unter 20 % übrig), und gähnt und schläft nach zwei Minuten ohne Turn. Wo das Pane niedrig ist, nimmt eine Mini-Eule seinen Platz ein.
 
@@ -73,7 +73,7 @@ In `/config`, jeweils unter `noxdeck.<name>`, oder bei der Installation in einer
 
 ## Was dieser Mod kann
 
-`claude plugin validate .` liest das Hooks-Modul so, wie Claude Code es lädt, und nennt jedes Ereignis, in das es sich einhängt, und jeden Aufruf, den es auf `$` macht. Für noxdeck 1.0.9:
+`claude plugin validate .` liest das Hooks-Modul so, wie Claude Code es lädt, und nennt jedes Ereignis, in das es sich einhängt, und jeden Aufruf, den es auf `$` macht. Für noxdeck 1.1.0:
 
 ```
 hooks: session.start, command.run{command=noxdeck}, ui.close{id=noxdeck}, tool.call, agent.spawn, tool.check, classic.PreToolUse, classic.PermissionRequest, classic.PermissionDenied, classic.PostToolUseFailure, classic.PostToolUse, turn.step, turn.start, turn.complete, session.measure, session.compact, session.end, ui.render{component=Pane, requestId=noxdeck}, ui.render{component=SessionMode}
@@ -91,8 +91,8 @@ Kein Netzwerk, keine Dateischreibzugriffe, kein Prompt-Logging: noxdeck stellt k
 | `session.start` | Den Start der Sitzung: Er liest die Einstellung Reduce motion, den Projektordner, das Kontextfenster und die Agent-Liste, registriert `/noxdeck` und öffnet sein Pane (in einer interaktiven Sitzung, außer du hast es geschlossen). | Nein: Das Ereignis geht unverändert weiter. |
 | `command.run{command=noxdeck}` | Nur `/noxdeck`; kein anderer Befehl erreicht ihn. | Beantwortet `/noxdeck` selbst: öffnet das Pane (auf dem genannten Tab) und antwortet mit einer Zeile. |
 | `ui.close{id=noxdeck}` | Das Schließen seines eigenen Panes. | Nein; er merkt sich, dass du es geschlossen hast, damit das Pane nicht von selbst wieder aufgeht. |
-| `tool.call` | Jeden Tool-Aufruf und sein Ergebnis: das Tool, den Namen einer Datei, die Zeilen, die eine Änderung hinzugefügt und entfernt hat, ob er fehlgeschlagen ist, Claudes Todo-Liste. | Nein: Aufruf und Ergebnis gehen unverändert weiter. |
-| `agent.spawn` | Den Start eines Subagents: seine Beschreibung, seinen Typ, ob ein Workflow ihn gestartet hat (seinen Prompt nur als Hash und Länge, um seinen ersten Turn daran zu erkennen). | Nein: `return next(e)`, die Antwort ungelesen. |
+| `tool.call` | Jeden Tool-Aufruf und sein Ergebnis: das Tool, den Namen einer Datei, die Zeilen, die eine Änderung hinzugefügt und entfernt hat, ob er fehlgeschlagen ist, Claudes Todo-Liste, Name und Kennung eines Workflow-Laufs. | Nein: Aufruf und Ergebnis gehen unverändert weiter. |
+| `agent.spawn` | Den Start eines Subagents: seine Beschreibung, seinen Typ, ob ein Workflow ihn gestartet hat und in welchem Lauf (seinen Prompt nur als Hash und Länge, um seinen ersten Turn daran zu erkennen). | Nein: `return next(e)`, die Antwort ungelesen. |
 | `tool.check` | Dass ein Aufruf die Berechtigungsprüfung erreicht hat. | Nein: `return next(e)`, das Urteil ungelesen. |
 | `classic.PreToolUse` | Dass ein Aufruf die PreToolUse-Hooks erreicht hat. | Nein: `return next(e)`. |
 | `classic.PermissionRequest` | Das Öffnen eines Berechtigungsdialogs: Nox zeigt ein ?, bis der Aufruf endet. | Nein: `return next(e)`, die Antwort ungelesen. |

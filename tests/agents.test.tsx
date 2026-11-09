@@ -215,13 +215,13 @@ describe('Agents: tokens, model and activity per agent', () => {
       const texts = await ui.findAll({ type: 'Text' })
       expect(has(texts, /^▸ Verarbeitet seit Laden · Haupt-Chat 0 · Agents 10k · Sonstiges 0$/)).toBe(true)
       // Context 1k + 3k + 4k, processed all four kinds, new without the 3k read from the cache.
-      expect(has(texts, /^ {2}Kontext 8k · verarbeitet 10k · davon neu 7k$/)).toBe(true)
-      expect(has(texts, /^ {2}opus · high · 1 Schritt$/)).toBe(true)
+      expect(has(texts, /^ {4}Kontext 8k · verarbeitet 10k · davon neu 7k$/)).toBe(true)
+      expect(has(texts, /^ {4}opus · high · 1 Schritt$/)).toBe(true)
       expect(texts.some(found => found.text === '10k' && found.props.color === 'text' && found.props.bold === true)).toBe(true)
       expect(texts.some(found => found.text === '0:01' && found.props.color === 'claude')).toBe(true)
       // Its type is the only one, so not named.
       expect(has(texts, /workflow-subagent/)).toBe(false)
-      expect(has(texts, /^ {2}verarbeitet –$/)).toBe(false)
+      expect(has(texts, /^ {4}verarbeitet –$/)).toBe(false)
       await ui.unmount()
     }
   })
@@ -259,8 +259,8 @@ describe('Agents: tokens, model and activity per agent', () => {
     const texts = await ui.findAll({ type: 'Text' })
     // Both of its steps are the Agents pot's; the id no spawn and no list named stays Sonstiges.
     expect(has(texts, /^▸ Verarbeitet seit Laden · Haupt-Chat 0 · Agents 40k · Sonstiges 3k$/)).toBe(true)
-    expect(has(texts, /^ {2}opus · high · 2 Schritte$/)).toBe(true)
-    expect(has(texts, /^ {2}Kontext 15k · verarbeitet 40k · davon neu 20k$/)).toBe(true)
+    expect(has(texts, /^ {4}opus · high · 2 Schritte$/)).toBe(true)
+    expect(has(texts, /^ {4}Kontext 15k · verarbeitet 40k · davon neu 20k$/)).toBe(true)
     // Its start was heard before the spawn's answer: the timeline has it.
     expect(has(texts, /^Zeitleiste seit Laden$/)).toBe(true)
     expect(has(texts, /compaction/)).toBe(false)
@@ -282,8 +282,8 @@ describe('Agents: tokens, model and activity per agent', () => {
     await clock.advance(1000)
     const ui = await agentsTab($, 'terminal')
     const rows = await rowsOf(ui)
-    expect(rows['wf-a']).toMatch(/^ {2}◉ a\.ts +10k /)
-    expect(rows['wf-b']).toMatch(/^ {2}◉ b\.ts +20k /)
+    expect(rows['wf-a']).toMatch(/^ {2}◉ prüfen: a\.ts +10k /)
+    expect(rows['wf-b']).toMatch(/^ {2}◉ prüfen: b\.ts +20k /)
     expect(rows.unread).toBeUndefined()
     await ui.unmount()
   })
@@ -331,8 +331,8 @@ describe('Agents: tokens, model and activity per agent', () => {
       await clock.advance(1000)
       const { head, rows } = await shown($)
       expect(head).toBe('▸ Verarbeitet seit Laden · Haupt-Chat 0 · Agents 30k · Sonstiges 0')
-      expect(rows['wf-a']).toMatch(/^ {2}◉ a\.ts +10k /)
-      expect(rows['wf-b']).toMatch(/^ {2}◉ b\.ts +20k /)
+      expect(rows['wf-a']).toMatch(/^ {2}◉ prüfen: a\.ts +10k /)
+      expect(rows['wf-b']).toMatch(/^ {2}◉ prüfen: b\.ts +20k /)
     })
 
     for (const [what, text] of [
@@ -348,7 +348,7 @@ describe('Agents: tokens, model and activity per agent', () => {
         await $.turn.start({ text, turnId: 'a', agentId: 'wf-a' })
         await step($, 'wf-a')
         await clock.advance(1000)
-        expect((await shown($)).rows['wf-a']).toMatch(/^◉ prüfen: a\.ts +10k /)
+        expect((await shown($)).rows['wf-a']).toMatch(/^ {2}◉ prüfen: a\.ts +10k /)
       })
     }
 
@@ -363,8 +363,8 @@ describe('Agents: tokens, model and activity per agent', () => {
       await step($, 'wf-b')
       await clock.advance(1000)
       const { rows } = await shown($)
-      expect(rows['wf-a']).toMatch(/^ {2}◉ lang +10k /)
-      expect(rows['wf-b']).toMatch(/^ {2}◉ kurz +20k /)
+      expect(rows['wf-a']).toMatch(/^ {2}◉ prüfen: lang +10k /)
+      expect(rows['wf-b']).toMatch(/^ {2}◉ prüfen: kurz +20k /)
     })
 
     test('a run that hides its script: a framed turn takes the oldest workflow spawn, its tokens the Agents pot\'s', async ($, on) => {
@@ -380,8 +380,8 @@ describe('Agents: tokens, model and activity per agent', () => {
       await clock.advance(1000)
       const { head, rows } = await shown($)
       expect(head).toBe('▸ Verarbeitet seit Laden · Haupt-Chat 0 · Agents 30k · Sonstiges 0')
-      expect(rows['wf-a']).toMatch(/^ {2}◉ a\.ts +10k /)
-      expect(rows['wf-b']).toMatch(/^ {2}◉ b\.ts +20k /)
+      expect(rows['wf-a']).toMatch(/^ {2}◉ prüfen: a\.ts +10k /)
+      expect(rows['wf-b']).toMatch(/^ {2}◉ prüfen: b\.ts +20k /)
     })
 
     for (const [what, text] of [
@@ -399,7 +399,7 @@ describe('Agents: tokens, model and activity per agent', () => {
         await clock.advance(1000)
         const { head, rows } = await shown($)
         expect(head).toBe('▸ Verarbeitet seit Laden · Haupt-Chat 0 · Agents 20k · Sonstiges 10k')
-        expect(rows['wf-b']).toMatch(/^◉ prüfen: a\.ts +20k /)
+        expect(rows['wf-b']).toMatch(/^ {2}◉ prüfen: a\.ts +20k /)
         expect(rows['fork-1']).toBeUndefined()
       })
     }
@@ -420,8 +420,8 @@ describe('Agents: tokens, model and activity per agent', () => {
       await clock.advance(1000)
       const { head, rows } = await shown($)
       expect(head).toBe('▸ Verarbeitet seit Laden · Haupt-Chat 0 · Agents 30k · Sonstiges 10k')
-      expect(rows['tool-1']).toMatch(/^ {2}◉ tool +10k /)
-      expect(rows['wf-b']).toMatch(/^ {2}◉ a\.ts workflow-subagent +20k /)
+      expect(rows['tool-1']).toMatch(/^◉ prüfen: tool +10k /)
+      expect(rows['wf-b']).toMatch(/^ {2}◉ prüfen: a\.ts +20k /)
       expect(rows['wf-c']).toBeUndefined()
     })
 
@@ -629,7 +629,7 @@ describe('Agents: tokens, model and activity per agent', () => {
     expect(boards.at(-1)?.rows.length).toBe(MAX_AGENTS)
     const ui = await agentsTab($, 'terminal', 48)
     const texts = await ui.findAll({ type: 'Text' })
-    expect(has(texts, /^ ?50 fertig ?$/)).toBe(true)
+    expect(has(texts, /^ ?60 fertig ?$/)).toBe(true)
     expect(has(texts, /^prüfen ×50$/)).toBe(true)
     expect(has(texts, /^f9\.ts$/)).toBe(false)
     expect(has(texts, /^Agents 60k · Sonstiges 0$/)).toBe(true)
@@ -642,7 +642,7 @@ describe('Agents: tokens, model and activity per agent', () => {
     await shorter.unmount()
     // Too tall even so for a short pane: the compact view, every one kept counted.
     const short = await agentsTab($, 'terminal', 48, 10)
-    expect(has(await short.findAll({ type: 'Text' }), /^ 50 ✓ · verarbeitet 60k$/)).toBe(true)
+    expect(has(await short.findAll({ type: 'Text' }), /^ 60 ✓ · verarbeitet 60k$/)).toBe(true)
     await short.unmount()
   })
 
@@ -907,11 +907,14 @@ describe('Agents: tokens, model and activity per agent', () => {
       // The full card and the compact view alike.
       for (const [columns, rows] of [[90, 80], [48, 12]] as const) {
         const ui = await agentsTab($, surface, columns, rows)
+        // The finished one stands in its running run's line of finished agents, closed at first: opened for the press.
+        await ui.press({ key: 'group-done:wf_1' })
         // The running one's row and the finished one's.
         for (const id of ['wf-1', 'wf-2', 'g-1']) expect((await ui.find({ type: 'Button', key: id }))?.key).toBe(id)
         await ui.press({ key: 'wf-1' })
         await ui.press({ key: 'wf-2' })
         await ui.press({ key: 'g-1' })
+        await ui.press({ key: 'group-done:wf_1' })
         await ui.unmount()
       }
     }
@@ -1622,17 +1625,17 @@ describe('Agents: tokens, model and activity per agent', () => {
       expect(await markedTexts(viewed)).not.toContain('600k')
       await viewed.unmount()
 
-      // The compact view: the running group a line, closed, its time and sum as an agent's line says them; opened, its agents.
+      // The compact view: the running group a line, open over its running agents (version 1.1), its time and sum as an agent's line says them; a press closes it.
       const short = await agentsTab($, surface, 48, 12)
-      expect((await short.find({ type: 'Button', key: 'group-live:verify' }))?.text).toMatch(/^◉ ▸ verify ×3 1:23 · 600k *$/)
-      expect(await short.find({ type: 'Button', key: 'v-a' })).toBeUndefined()
-      await short.press({ key: 'group-live:verify' })
-      expect(written.at(-1)).toEqual({ shape: 'noxdeck/3', value: { closed: [], opened: ['live:verify'] } })
       expect((await short.find({ type: 'Button', key: 'group-live:verify' }))?.text).toMatch(/^◉ ▾ verify ×3 1:23 · 600k *$/)
       expect((await short.find({ type: 'Button', key: 'v-a' }))?.text).toMatch(/^ {2}◉ a\.ts 1:23 · 100k → Read a\.ts *$/)
       await short.press({ key: 'v-a' })
       await short.press({ key: 'group-live:verify' })
+      expect(written.at(-1)).toEqual({ shape: 'noxdeck/3', value: { closed: [], opened: ['live:verify'] } })
+      expect((await short.find({ type: 'Button', key: 'group-live:verify' }))?.text).toMatch(/^◉ ▸ verify ×3 1:23 · 600k *$/)
       expect(await short.find({ type: 'Button', key: 'v-a' })).toBeUndefined()
+      await short.press({ key: 'group-live:verify' })
+      expect((await short.find({ type: 'Button', key: 'v-a' }))?.text).toMatch(/^ {2}◉ a\.ts 1:23 · 100k → Read a\.ts *$/)
       await short.unmount()
     }
     expect(views).toEqual([{ agentId: 'v-b' }, { agentId: 'r1' }, { agentId: 'v-a' }, { agentId: 'v-b' }, { agentId: 'r1' }, { agentId: 'v-a' }])
@@ -1900,6 +1903,43 @@ describe('Agents: tokens, model and activity per agent', () => {
     return { toasts, idOf, clock }
   }
 
+  /**
+   * The thirteen agents of workflowSession, started by the Agent tool
+   * instead (version 1.1): of no run, so the words before „:“ group them, as
+   * a workflow's agents were grouped up to 1.0.9. Listed while they run and
+   * after; each 100k processed. Finished at 0:01: `check:unpack`, `step0`,
+   * `diff`, `hat` and `verify:diff#0`–`#3`; still running, each last in Bash:
+   * `verify:hat#0`–`#4`. The clock at 0:06; every view asked for kept.
+   */
+  async function toolSession($: Engine, on: On) {
+    const world = { agents: [] as AgentInfo[] }
+    const clock = engine(on, world)
+    spawnsAs(on, world)
+    const finished = [...['unpack', 'step0', 'diff', 'hat'].map(x => `check:${x}`), ...[0, 1, 2, 3].map(i => `verify:diff#${i}`)]
+    const live = [0, 1, 2, 3, 4].map(i => `verify:hat#${i}`)
+    const ids = new Map([...finished, ...live].map((description, i) => [description, `t-${i}`]))
+    const idOf = (description: string) => ids.get(description) ?? 'unknown'
+    const views: SiteView[] = []
+    on('ui.view', (_, e) => {
+      views.push(e)
+      return { value: {} }
+    })
+    on('tool.call', (_, e) => (e.tool === 'Bash' ? BASH_OK : READ_RESULT))
+    modelBeneath(on, () => usageOf(0, 0, 100 * K, 0))
+    await start($)
+    for (const description of [...finished, ...live]) {
+      await spawnListed($, world, [running(idOf(description), description)])
+      await $.turn.start({ text: '', turnId: idOf(description), agentId: idOf(description) })
+      await step($, idOf(description))
+    }
+    await clock.advance(1000)
+    world.agents = world.agents.map(one => (finished.includes(one.description) ? { ...one, status: 'completed' } : one))
+    for (const description of finished) await $.turn.complete({ turnId: idOf(description), agentId: idOf(description), durationMs: 1000, ...ANSWERED })
+    for (const description of live) await $.tool.call({ tool: 'Bash', command: 'bun x.ts', agentId: idOf(description) })
+    await clock.advance(5000)
+    return { views, idOf, clock }
+  }
+
   /** The tab's rows as drawn: each Button's key and text (the tabs aside), and each line counting what was left out. */
   const drawnRows = async (ui: { findAll: (q: { type: string }) => Promise<(Found & { key?: string })[]> }) => [
     ...(await ui.findAll({ type: 'Button' })).filter(found => !found.key?.startsWith('tab-')).map(found => [found.key ?? '', found.text.trimEnd()] as const),
@@ -1922,23 +1962,22 @@ describe('Agents: tokens, model and activity per agent', () => {
     return isFolded ? 'folded' : 'lines'
   }
 
-  test('a live session\'s thirteen workflow agents in a pane of 40 rows: the card shortened, running agents a line each, not the compact view; 12 rows: the compact view', async ($, on) => {
+  test('a live session\'s thirteen workflow agents, one run, in a pane of 30 rows: the card shortened, the run\'s head over its running agents a line each, its finished ones in a line; 12 rows: the compact view', async ($, on) => {
     const { toasts } = await workflowSession($, on)
     for (const surface of SURFACES) {
       for (const columns of [48, 90]) {
-        const ui = await agentsTab($, surface, columns, 40)
-        expect(await agentsLayout(ui)).not.toBe('compact')
-        expect(await agentsLayout(ui)).not.toBe('full')
+        const ui = await agentsTab($, surface, columns, 30)
+        expect(await agentsLayout(ui)).toBe('lines')
         const rows = Object.fromEntries(await drawnRows(ui))
-        // The running group open on the accent, ▾; each of its agents in one line: the rest of its name, time · processed, → its last call.
-        expect(rows['group-live:verify']).toMatch(/^◉ ▾ verify ×5 +500k 0:06$/)
-        for (const i of [0, 1, 2, 3, 4]) expect(rows[`wf-${8 + i}`]).toMatch(new RegExp(`^ {2}◉ hat#${i} 0:06 · 100k → Bash$`))
-        // No ┄ between them, no model's or figures' lines under them.
         const texts = await ui.findAll({ type: 'Text' })
+        // The run's head on the accent, no fold mark, by its id (no Workflow call was heard), all thirteen counted;
+        // each running agent in one line: its whole name, time · processed, → its last call.
+        expect(texts.some(found => found.text === '◉ Workflow wf_1 ×13' && found.props.backgroundColor === 'claude' && found.props.bold === true)).toBe(true)
+        for (const i of [0, 1, 2, 3, 4]) expect(rows[`wf-${8 + i}`]).toMatch(new RegExp(`^ {2}◉ verify:hat#${i} 0:06 · 100k → Bash$`))
+        // No ┄ between them, no model's or figures' lines under them.
         expect(has(texts, /^┄+$|Kontext|· \d+ Schritte?$/)).toBe(false)
-        // The finished groups and the pots' head stay, as in the full card.
-        expect(rows['group-verify']).toMatch(/^✓ [▾▸] verify ×4 /)
-        expect(rows['group-check']).toMatch(/^✓ [▾▸] check ×4 /)
+        // Its eight finished agents in a line under them, closed; the pots' head stays, as in the full card.
+        expect(rows['group-done:wf_1']).toMatch(/^ {2}✓ ▸ 8 fertig +800k 0:01$/)
         expect(rows.processed).toMatch(/^▸ Verarbeitet seit Laden/)
         // A press on a workflow's agent says where to see it, as before.
         await ui.press({ key: 'wf-8' })
@@ -1947,14 +1986,14 @@ describe('Agents: tokens, model and activity per agent', () => {
         const short = await agentsTab($, surface, columns, 12)
         expect(await agentsLayout(short)).toBe('compact')
         expect(has(await short.findAll({ type: 'Text' }), /^ 5 ◉ · 8 ✓ · verarbeitet 1,3M$/)).toBe(true)
-        expect(Object.fromEntries(await drawnRows(short))['group-live:verify']).toMatch(/^◉ ▸ verify ×5 0:06 · 500k$/)
+        expect(Object.fromEntries(await drawnRows(short))['wf-8']).toBe('  ◉ verify:hat#0 0:06 · 100k → Bash')
         await short.unmount()
       }
     }
     expect(toasts).toEqual(Array.from({ length: 4 }, () => 'Workflow-Agents siehst du über /workflows'))
   })
 
-  test('a group\'s head opens and closes it in the shortened card and in the compact view, running or finished; another group\'s head never gives way to its agents', async ($, on) => {
+  test('a running run\'s line of finished agents opens and closes in the compact view and the shortened card; its running agents never give way to them', async ($, on) => {
     const written: unknown[] = []
     on('state.set', { plugin: 'noxdeck' }, (_, e, next) => {
       if (e.key === 'agentFolds') written.push(e.value)
@@ -1962,74 +2001,43 @@ describe('Agents: tokens, model and activity per agent', () => {
     })
     await workflowSession($, on)
     const keysOf = async (ui: { findAll: (q: { type: string }) => Promise<(Found & { key?: string })[]> }) => (await drawnRows(ui)).map(([key]) => key)
+    const running = ['wf-8', 'wf-9', 'wf-10', 'wf-11', 'wf-12']
     for (const surface of SURFACES) {
-      // The compact view (12 rows): every group closed, the running one and the finished.
-      const short = await agentsTab($, surface, 90, 12)
+      // The compact view (14 rows; the desktop's frame takes one more): the running agents a line each, the finished ones' line closed.
+      const short = await agentsTab($, surface, 90, surface === 'terminal' ? 14 : 15)
       expect(await agentsLayout(short)).toBe('compact')
       expect(await drawnRows(short)).toEqual([
-        ['group-live:verify', '◉ ▸ verify ×5 0:06 · 500k'],
-        ['group-verify', '✓ ▸ verify ×4 400k'],
-        ['group-check', '✓ ▸ check ×4 400k'],
+        ...[0, 1, 2, 3, 4].map(i => [`wf-${8 + i}`, `  ◉ verify:hat#${i} 0:06 · 100k → Bash`]),
+        ['group-done:wf_1', '  ✓ ▸ 8 fertig 800k'],
       ])
-      // The running group opened: its agents in a line each, under its head; the finished heads stay.
-      await short.press({ key: 'group-live:verify' })
-      expect(written.at(-1)).toEqual({ shape: 'noxdeck/3', value: { closed: [], opened: ['live:verify'] } })
+      // Opened: its agents in the rows there are, by their whole names under it, its first ones first; every running agent stays.
+      await short.press({ key: 'group-done:wf_1' })
+      expect(written.at(-1)).toEqual({ shape: 'noxdeck/3', value: { closed: [], opened: ['done:wf_1'] } })
       const opened = Object.fromEntries(await drawnRows(short))
-      expect(opened['group-live:verify']).toBe('◉ ▾ verify ×5 0:06 · 500k')
-      expect(opened['wf-8']).toBe('  ◉ hat#0 0:06 · 100k → Bash')
-      expect(await keysOf(short)).toContain('group-verify')
-      expect(await keysOf(short)).toContain('group-check')
-      await short.press({ key: 'group-live:verify' })
-      // A finished group opened, then the other: their agents in the rows there are, every head still there to press.
-      await short.press({ key: 'group-verify' })
-      expect(Object.fromEntries(await drawnRows(short))['group-verify']).toBe('✓ ▾ verify ×4 400k')
-      expect(await keysOf(short)).toContain('wf-4')
-      await short.press({ key: 'group-check' })
-      expect(Object.fromEntries(await drawnRows(short))['group-check']).toBe('✓ ▾ check ×4 400k')
-      // Each open group keeps its first agent longest: the one opened last shows one too.
-      const both = await keysOf(short)
-      expect(both).toEqual(expect.arrayContaining(['group-live:verify', 'group-verify', 'group-check', 'wf-4', 'wf-0']))
-      // What did not fit is counted, the running group's five with none of them left out.
-      const counted = (await drawnRows(short)).filter(([key]) => key === '').map(([, text]) => text)
-      expect(counted).toHaveLength(1)
-      expect(counted[0]).toMatch(/^\+\d ✓$/)
-      expect(written.at(-1)).toEqual({ shape: 'noxdeck/3', value: { closed: [], opened: ['verify', 'check'] } })
-      await short.press({ key: 'group-verify' })
-      await short.press({ key: 'group-check' })
+      expect(opened['group-done:wf_1']).toBe('  ✓ ▾ 8 fertig 800k')
+      expect(opened['wf-0']).toBe('      check:unpack 100k')
+      expect(await keysOf(short)).toEqual(expect.arrayContaining(running))
+      expect(await keysOf(short)).not.toContain('wf-7')
+      await short.press({ key: 'group-done:wf_1' })
       expect(written.at(-1)).toEqual({ shape: 'noxdeck/3', value: { closed: [], opened: [] } })
       await short.unmount()
 
-      // The full card shortened until its finished groups close (the rows found by shrinking the pane): a press opens one there.
-      let rows = 40
-      let folded = await agentsTab($, surface, 90, rows)
-      while ((await agentsLayout(folded)) !== 'folded' && rows > 12) {
-        await folded.unmount()
-        rows -= 1
-        folded = await agentsTab($, surface, 90, rows)
-      }
-      expect(await agentsLayout(folded)).toBe('folded')
-      expect(await keysOf(folded)).not.toContain('wf-4')
-      await folded.press({ key: 'group-verify' })
-      // Open, the card shortened as it was (it scrolls where it runs past the pane); kept as the compact view keeps it.
-      expect(Object.fromEntries(await drawnRows(folded))['group-verify']).toMatch(/^✓ ▾ verify ×4/)
-      expect(await folded.find({ type: 'Button', key: 'processed' })).toBeDefined()
-      expect(has(await folded.findAll({ type: 'Text' }), /^Zeitleiste/)).toBe(true)
-      expect(await keysOf(folded)).toContain('wf-4')
-      expect(written.at(-1)).toEqual({ shape: 'noxdeck/3', value: { closed: [], opened: ['verify'] } })
-      await folded.press({ key: 'group-verify' })
-      expect(await keysOf(folded)).not.toContain('wf-4')
-      // The running group folds there as in the full card.
-      await folded.press({ key: 'group-live:verify' })
-      expect(Object.fromEntries(await drawnRows(folded))['group-live:verify']).toMatch(/^◉ ▸ verify ×5 /)
-      expect(await keysOf(folded)).not.toContain('wf-8')
-      await folded.press({ key: 'group-live:verify' })
-      expect(await keysOf(folded)).toContain('wf-8')
+      // The full card shortened (30 rows): a press opens it there, all eight under it; kept apart from the compact view's.
+      const lines = await agentsTab($, surface, 90, 30)
+      expect(await agentsLayout(lines)).toBe('lines')
+      expect(await keysOf(lines)).not.toContain('wf-0')
+      await lines.press({ key: 'group-done:wf_1' })
+      expect(written.at(-1)).toEqual({ shape: 'noxdeck/3', value: { closed: ['done:wf_1'], opened: [] } })
+      expect(Object.fromEntries(await drawnRows(lines))['group-done:wf_1']).toMatch(/^ {2}✓ ▾ 8 fertig +800k 0:01$/)
+      expect(await keysOf(lines)).toEqual(expect.arrayContaining([...['wf-0', 'wf-1', 'wf-2', 'wf-3', 'wf-4', 'wf-5', 'wf-6', 'wf-7'], ...running]))
+      await lines.press({ key: 'group-done:wf_1' })
+      expect(await keysOf(lines)).not.toContain('wf-0')
       expect(written.at(-1)).toEqual({ shape: 'noxdeck/3', value: { closed: [], opened: [] } })
-      await folded.unmount()
+      await lines.unmount()
     }
   })
 
-  test('the card is shortened in this order as the pane shrinks: running agents a line each, then the finished groups closed, then no timeline; the compact view last', { timeoutMs: 15_000 }, async ($, on) => {
+  test('a run\'s card is shortened in this order as the pane shrinks: running agents a line each, then no timeline (a run has no finished group to close); the compact view last', { timeoutMs: 15_000 }, async ($, on) => {
     await workflowSession($, on)
     for (const surface of SURFACES) {
       for (const columns of [48, 90]) {
@@ -2041,7 +2049,7 @@ describe('Agents: tokens, model and activity per agent', () => {
           await ui.unmount()
         }
         // Each step once, in this order, each only where the one before does not fit.
-        expect(seen).toEqual(['full', 'lines', 'folded', 'untimed', 'compact'])
+        expect(seen).toEqual(['full', 'lines', 'untimed, open', 'compact'])
       }
     }
   })
@@ -2050,57 +2058,52 @@ describe('Agents: tokens, model and activity per agent', () => {
     const { idOf } = await workflowSession($, on)
     const id = idOf('verify:hat#0')
     for (const surface of SURFACES) {
-      for (const rows of [80, 40, 12]) {
+      // The compact view at 12 rows (the desktop's frame takes one more).
+      for (const rows of [80, 30, surface === 'terminal' ? 12 : 13]) {
         const ui = await agentsTab($, surface, 90, rows)
-        if (rows === 12) {
-          await ui.press({ key: 'group-live:verify' })
-          await ui.press({ key: 'group-verify' })
-        }
+        if (rows < 30) await ui.press({ key: 'group-done:wf_1' })
         const texts = await ui.findAll({ type: 'Text' })
-        // A fold mark only on a group's head and the pots' head.
+        // A fold mark only on a group's head, a run's line of finished agents and the pots' head.
         for (const found of await ui.findAll({ type: 'Button' })) {
           if (/[▸▾]/.test(found.text)) expect(found.key).toMatch(/^(group-|processed$)/)
         }
         expect(has(texts, /[▸▾] *(Bash|Read)/)).toBe(false)
         expect(has(texts, /→ Bash/)).toBe(true)
-        expect((await ui.find({ type: 'Button', key: id }))?.text).toMatch(rows === 80 ? /^ {2}◉ hat#0 / : /→ Bash/)
-        if (rows === 12) {
-          await ui.press({ key: 'group-live:verify' })
-          await ui.press({ key: 'group-verify' })
-        }
+        expect((await ui.find({ type: 'Button', key: id }))?.text).toMatch(rows === 80 ? /^ {2}◉ verify:hat#0 / : /→ Bash/)
+        if (rows < 30) await ui.press({ key: 'group-done:wf_1' })
         await ui.unmount()
       }
     }
   })
 
-  test('a press on a group\'s head turns that group alone, at every height from 40 rows to 12: it shows what it opened; the layout and the other heads stay', { timeoutMs: 60_000 }, async ($, on) => {
+  test('a press on a run\'s line of finished agents turns it alone, at every height from 40 rows to 12: it shows what it opened where its running agents leave rows; the layout stays', { timeoutMs: 60_000 }, async ($, on) => {
     await workflowSession($, on)
-    // Each head's agents, by their ids.
+    // The line's agents, by their ids.
     const membersOf: Readonly<Record<string, readonly string[]>> = {
-      'group-live:verify': ['wf-8', 'wf-9', 'wf-10', 'wf-11', 'wf-12'],
-      'group-verify': ['wf-4', 'wf-5', 'wf-6', 'wf-7'],
-      'group-check': ['wf-0', 'wf-1', 'wf-2', 'wf-3'],
+      'group-done:wf_1': ['wf-0', 'wf-1', 'wf-2', 'wf-3', 'wf-4', 'wf-5', 'wf-6', 'wf-7'],
     }
     const heads = Object.keys(membersOf)
-    const markOf = (text: string | undefined) => text?.slice(0, 3)
-    // The layout apart from the folds the press turns: lines and folded tell the finished heads' marks, which are checked one by one.
+    const running = ['wf-8', 'wf-9', 'wf-10', 'wf-11', 'wf-12']
+    // The layout apart from the folds the press turns.
     const shapeOf = async (ui: Parameters<typeof agentsLayout>[0]) => (await agentsLayout(ui)).replace(/^folded$/, 'lines').replace(/^untimed, open$/, 'untimed')
     for (const surface of SURFACES) {
-      for (let rows = 40; rows >= 12; rows -= 1) {
+      // Down to 12 rows (the desktop's frame takes one more).
+      for (let rows = 40; rows >= (surface === 'terminal' ? 12 : 13); rows -= 1) {
         const ui = await agentsTab($, surface, 90, rows)
         const layout = await shapeOf(ui)
         for (const key of heads) {
           const before = Object.fromEntries(await drawnRows(ui))
           expect(before[key]).toBeDefined()
-          const wasOpen = /^. ▾/.test(before[key] ?? '')
+          const wasOpen = /^ {2}. ▾/.test(before[key] ?? '')
           await ui.press({ key })
           const after = Object.fromEntries(await drawnRows(ui))
           expect(await shapeOf(ui)).toBe(layout)
-          expect(after[key]).toMatch(wasOpen ? /^. ▸ / : /^. ▾ /)
-          for (const other of heads.filter(one => one !== key)) expect(markOf(after[other])).toBe(markOf(before[other]))
+          expect(after[key]).toMatch(wasOpen ? /^ {2}. ▸ / : /^ {2}. ▾ /)
+          // Every running agent that showed still shows: the finished never take their rows.
+          for (const id of running.filter(one => before[one] !== undefined)) expect(after[id]).toBe(before[id])
           const shown = (membersOf[key] ?? []).filter(id => after[id] !== undefined)
           if (wasOpen) expect(shown).toEqual([])
-          else expect(shown.length).toBeGreaterThan(0)
+          else if (layout !== 'compact') expect(shown.length).toBeGreaterThan(0)
           // Pressed again: as it was.
           await ui.press({ key })
           expect(Object.fromEntries(await drawnRows(ui))).toEqual(before)
@@ -2110,7 +2113,7 @@ describe('Agents: tokens, model and activity per agent', () => {
     }
   })
 
-  test('the compact view keeps every group\'s head however many agents without a group run; a press opens one, its agents shown', async ($, on) => {
+  test('the compact view keeps every running agent without a group, and the groups\' heads in the rows left; a head opened stays longest', async ($, on) => {
     const world = { agents: [] as AgentInfo[] }
     const clock = engine(on, world)
     spawnsAs(on, world)
@@ -2123,27 +2126,32 @@ describe('Agents: tokens, model and activity per agent', () => {
     ])
     for (const id of world.agents.map(one => one.id)) await step($, id)
     await clock.advance(1000)
+    const runningIds = ['r-alpha', 'r-bravo', 'r-charlie', 'r-delta', 'r-echo']
     for (const surface of SURFACES) {
-      const short = await agentsTab($, surface, 90, 12)
+      // 12 rows: the desktop's frame takes one more.
+      const short = await agentsTab($, surface, 90, surface === 'terminal' ? 12 : 13)
       expect(await agentsLayout(short)).toBe('compact')
       let keys = (await drawnRows(short)).map(([key]) => key)
-      expect(keys).toEqual(expect.arrayContaining(['group-verify', 'group-check']))
-      // Each opened in turn: its first agent shows, the running agents that do not fit counted under the ones that do.
+      expect(keys).toEqual(expect.arrayContaining([...runningIds, 'group-verify', 'group-check']))
+      // Each opened in turn: the running agents all stay, none counted (version 1.1); its head stays, its agents give way to them.
       for (const [key, first] of [['group-verify', 'v-0'], ['group-check', 'c-0']] as const) {
         await short.press({ key })
         keys = (await drawnRows(short)).map(([one]) => one)
-        expect(keys).toEqual(expect.arrayContaining(['group-verify', 'group-check', first]))
-        expect((await drawnRows(short)).some(([one, text]) => one === '' && /^\+\d ◉$/.test(text))).toBe(true)
+        expect(keys).toEqual(expect.arrayContaining([...runningIds, key]))
+        expect(keys).not.toContain(first)
+        expect((await drawnRows(short)).some(([one, text]) => one === '' && /^\+\d ◉$/.test(text))).toBe(false)
       }
-      expect(keys).toEqual(expect.arrayContaining(['v-0', 'c-0']))
       await short.press({ key: 'group-verify' })
       await short.press({ key: 'group-check' })
       await short.unmount()
     }
   })
 
-  test('in the narrowest panes a running agent\'s line keeps its figures whole: the indent and the name give way, as a group\'s head keeps its count and figures', async ($, on) => {
+  test('in the narrowest panes a running agent\'s line keeps its figures whole: the indent and the name give way, as a run\'s head keeps its count and figures', async ($, on) => {
     const { clock } = await workflowSession($, on)
+    /** The run's head, a line no press acts on: by its count. */
+    const runHead = async (ui: { findAll: (q: { type: string }) => Promise<Found[]> }) =>
+      (await ui.findAll({ type: 'Text' })).find(found => found.props.wrap !== undefined && /×13/.test(found.text))?.text.trimEnd()
     for (const surface of SURFACES) {
       for (const columns of [24, 26, 28, 30, 36]) {
         const width = columns - 8
@@ -2157,11 +2165,10 @@ describe('Agents: tokens, model and activity per agent', () => {
         await ui.unmount()
         const short = await agentsTab($, surface, columns, 12)
         expect(await agentsLayout(short)).toBe('compact')
-        const lines = Object.fromEntries(await drawnRows(short))
-        // Its time gives way where four cells of its words leave no room for it; at 36 columns it stays.
-        expect(lines['group-live:verify']).toMatch(/^◉ ▸ (\S+ ×5 500k|\S{4,} ×5 0:06 · 500k)$/)
-        if (columns >= 36) expect(lines['group-live:verify']).toMatch(/×5 0:06 · 500k$/)
-        expect(lines['group-verify']).toMatch(/×4 400k$/)
+        // Its time gives way where four cells of its words leave no room for it; from 28 columns it stays.
+        expect(await runHead(short)).toMatch(/^◉ (.+ ×13 1,3M|.{4,} ×13 0:06 · 1,3M)$/)
+        if (columns >= 28) expect(await runHead(short)).toMatch(/×13 0:06 · 1,3M$/)
+        expect(Object.fromEntries(await drawnRows(short))['wf-8']).toMatch(/0:06 · 100k$/)
         await short.unmount()
       }
     }
@@ -2172,28 +2179,25 @@ describe('Agents: tokens, model and activity per agent', () => {
       const rows = Object.fromEntries(await drawnRows(ui))
       expect(rows['wf-8']).toBe('◉ 1:00:06 · 100k')
       await ui.unmount()
-      // The full card's running head: its words cut, at 28 columns left out, its glyph, fold mark, count and figures whole.
-      for (const [columns, head] of [[28, /^◉ ▾ ×5 +500k 1:00:06$/], [32, /^◉ ▾ \S+ ×5 +500k 1:00:06$/]] as const) {
+      // The full card's run head: its words cut, its glyph, count and figures whole.
+      for (const [columns, head] of [[28, /^◉ … ×13 +1,3M 1:00:06$/], [32, /^◉ \S+… ×13 +1,3M 1:00:06$/]] as const) {
         const wider = await agentsTab($, surface, columns, 40)
-        expect(Object.fromEntries(await drawnRows(wider))['group-live:verify']).toMatch(head)
+        expect(await runHead(wider)).toMatch(head)
         await wider.unmount()
       }
     }
   })
 
-  test('in the shortest panes the compact view keeps every head to press, the counts giving way first', async ($, on) => {
+  test('in the shortest panes the compact view keeps the run\'s running agents, counted where they do not fit; its line of finished agents gives way first', async ($, on) => {
     await workflowSession($, on)
-    const heads = ['group-live:verify', 'group-verify', 'group-check']
     for (const surface of SURFACES) {
       for (const rows of surface === 'terminal' ? [8, 9] : [9, 10]) {
         const ui = await agentsTab($, surface, 90, rows)
         expect(await agentsLayout(ui)).toBe('compact')
-        for (const key of heads) {
-          await ui.press({ key })
-          const keys = (await drawnRows(ui)).map(([one]) => one)
-          expect(keys).toEqual(expect.arrayContaining(heads))
-          await ui.press({ key })
-        }
+        const drawn = await drawnRows(ui)
+        expect(drawn.map(([one]) => one)).toContain('wf-8')
+        expect(drawn.map(([one]) => one)).not.toContain('group-done:wf_1')
+        expect(drawn.some(([one, text]) => one === '' && /^\+\d ◉$/.test(text))).toBe(true)
         await ui.unmount()
       }
     }
@@ -2218,28 +2222,319 @@ describe('Agents: tokens, model and activity per agent', () => {
     }
   })
 
-  test('the compact view: the agent in the main view keeps its line longest in an open group, and where it is left out its open head is marked', async ($, on) => {
+  test('the compact view: the agent in the main view keeps its line longest under a run\'s opened line of finished agents, and where it is left out that line is marked', async ($, on) => {
     await workflowSession($, on)
     for (const surface of SURFACES) {
-      // diff#3, the last of verify's: with a row too few its line stays, an agent before it gives way.
-      const viewed = await agentsTabViewing($, surface, 'wf-7', 90, surface === 'terminal' ? 13 : 14)
-      await viewed.press({ key: 'group-verify' })
+      // diff#3, the last of the eight: with a row too few for all its line stays, the agents before it give way.
+      const viewed = await agentsTabViewing($, surface, 'wf-7', 90, surface === 'terminal' ? 15 : 16)
+      await viewed.press({ key: 'group-done:wf_1' })
       const rows = Object.fromEntries(await drawnRows(viewed))
-      expect(rows['wf-7']).toBe('    diff#3 100k')
+      expect(rows['wf-7']).toBe('      verify:diff#3 100k')
       expect(Object.keys(rows).filter(key => /^wf-[4-6]$/.test(key)).length).toBeLessThan(3)
-      expect(await markedTexts(viewed)).toContain('diff#3 100k')
-      // The running group opened too: every other agent under a head gives way before diff#3.
-      await viewed.press({ key: 'group-live:verify' })
-      expect(Object.fromEntries(await drawnRows(viewed))['wf-7']).toBe('    diff#3 100k')
+      expect(await markedTexts(viewed)).toContain('verify:diff#3 100k')
+      // The running agents all before it: every one still there.
+      for (const id of ['wf-8', 'wf-9', 'wf-10', 'wf-11', 'wf-12']) expect(rows[id]).toBeDefined()
       await viewed.unmount()
-      // A row fewer: no row left for it, and its head is marked in its place.
-      const fewer = await agentsTabViewing($, surface, 'wf-7', 90, surface === 'terminal' ? 12 : 13)
+      // A row fewer: no row left for it, and its line is marked in its place.
+      const fewer = await agentsTabViewing($, surface, 'wf-7', 90, surface === 'terminal' ? 14 : 15)
       const rows2 = Object.fromEntries(await drawnRows(fewer))
       expect(rows2['wf-7']).toBeUndefined()
+      expect(rows2['group-done:wf_1']).toBe('  ✓ ▾ 8 fertig 800k')
+      expect(await markedTexts(fewer)).toContain('8 fertig 800k')
+      await fewer.press({ key: 'group-done:wf_1' })
+      await fewer.unmount()
+    }
+  })
+
+  test('agents of no run: the same thirteen agents started by the Agent tool in a pane of 40 rows: the card shortened, running agents a line each, not the compact view; 12 rows: the compact view', async ($, on) => {
+    const { views } = await toolSession($, on)
+    for (const surface of SURFACES) {
+      for (const columns of [48, 90]) {
+        const ui = await agentsTab($, surface, columns, 40)
+        expect(await agentsLayout(ui)).not.toBe('compact')
+        expect(await agentsLayout(ui)).not.toBe('full')
+        const rows = Object.fromEntries(await drawnRows(ui))
+        // The running group open on the accent, ▾; each of its agents in one line: the rest of its name, time · processed, → its last call.
+        expect(rows['group-live:verify']).toMatch(/^◉ ▾ verify ×5 +500k 0:06$/)
+        for (const i of [0, 1, 2, 3, 4]) expect(rows[`t-${8 + i}`]).toMatch(new RegExp(`^ {2}◉ hat#${i} 0:06 · 100k → Bash$`))
+        // No ┄ between them, no model's or figures' lines under them.
+        const texts = await ui.findAll({ type: 'Text' })
+        expect(has(texts, /^┄+$|Kontext|· \d+ Schritte?$/)).toBe(false)
+        // The finished groups and the pots' head stay, as in the full card.
+        expect(rows['group-verify']).toMatch(/^✓ [▾▸] verify ×4 /)
+        expect(rows['group-check']).toMatch(/^✓ [▾▸] check ×4 /)
+        expect(rows.processed).toMatch(/^▸ Verarbeitet seit Laden/)
+        // A press on an agent shows its transcript.
+        await ui.press({ key: 't-8' })
+        await ui.unmount()
+
+        const short = await agentsTab($, surface, columns, 12)
+        expect(await agentsLayout(short)).toBe('compact')
+        expect(has(await short.findAll({ type: 'Text' }), /^ 5 ◉ · 8 ✓ · verarbeitet 1,3M$/)).toBe(true)
+        // The running group open there too, its agents a line each (version 1.1).
+        expect(Object.fromEntries(await drawnRows(short))['group-live:verify']).toMatch(/^◉ ▾ verify ×5 0:06 · 500k$/)
+        expect(Object.fromEntries(await drawnRows(short))['t-8']).toBe('  ◉ hat#0 0:06 · 100k → Bash')
+        await short.unmount()
+      }
+    }
+    expect(views).toEqual(Array.from({ length: 4 }, () => ({ agentId: 't-8' })))
+  })
+
+  test('agents of no run: a group\'s head opens and closes it in the shortened card and in the compact view, running or finished; another group\'s head never gives way to its agents', async ($, on) => {
+    const written: unknown[] = []
+    on('state.set', { plugin: 'noxdeck' }, (_, e, next) => {
+      if (e.key === 'agentFolds') written.push(e.value)
+      return next(e)
+    })
+    await toolSession($, on)
+    const keysOf = async (ui: { findAll: (q: { type: string }) => Promise<(Found & { key?: string })[]> }) => (await drawnRows(ui)).map(([key]) => key)
+    for (const surface of SURFACES) {
+      // The compact view (13 rows; the desktop's frame takes one more): the running group open, its agents a line each
+      // under its head (version 1.1); the finished groups closed under them.
+      const short = await agentsTab($, surface, 90, surface === 'terminal' ? 13 : 14)
+      expect(await agentsLayout(short)).toBe('compact')
+      expect(await drawnRows(short)).toEqual([
+        ['group-live:verify', '◉ ▾ verify ×5 0:06 · 500k'],
+        ...[0, 1, 2, 3, 4].map(i => [`t-${8 + i}`, `  ◉ hat#${i} 0:06 · 100k → Bash`]),
+        ['group-verify', '✓ ▸ verify ×4 400k'],
+        ['group-check', '✓ ▸ check ×4 400k'],
+      ])
+      // The running group closed by a press: its head alone; the finished heads stay.
+      await short.press({ key: 'group-live:verify' })
+      expect(written.at(-1)).toEqual({ shape: 'noxdeck/3', value: { closed: [], opened: ['live:verify'] } })
+      const closed = Object.fromEntries(await drawnRows(short))
+      expect(closed['group-live:verify']).toBe('◉ ▸ verify ×5 0:06 · 500k')
+      expect(closed['t-8']).toBeUndefined()
+      expect(await keysOf(short)).toContain('group-verify')
+      expect(await keysOf(short)).toContain('group-check')
+      // With it closed, a finished group opened, then the other: their agents in the rows there are, every head still there to press.
+      await short.press({ key: 'group-verify' })
+      expect(Object.fromEntries(await drawnRows(short))['group-verify']).toBe('✓ ▾ verify ×4 400k')
+      expect(await keysOf(short)).toContain('t-4')
+      await short.press({ key: 'group-check' })
+      expect(Object.fromEntries(await drawnRows(short))['group-check']).toBe('✓ ▾ check ×4 400k')
+      // Each open group keeps its first agent longest: the one opened last shows one too.
+      const both = await keysOf(short)
+      expect(both).toEqual(expect.arrayContaining(['group-live:verify', 'group-verify', 'group-check', 't-4', 't-0']))
+      // What did not fit is counted, the running group's five with none of them left out.
+      const counted = (await drawnRows(short)).filter(([key]) => key === '').map(([, text]) => text)
+      expect(counted).toHaveLength(1)
+      expect(counted[0]).toMatch(/^\+\d ✓$/)
+      expect(written.at(-1)).toEqual({ shape: 'noxdeck/3', value: { closed: [], opened: ['live:verify', 'verify', 'check'] } })
+      await short.press({ key: 'group-verify' })
+      await short.press({ key: 'group-check' })
+      await short.press({ key: 'group-live:verify' })
+      expect(written.at(-1)).toEqual({ shape: 'noxdeck/3', value: { closed: [], opened: [] } })
+      await short.unmount()
+
+      // The full card shortened until its finished groups close (the rows found by shrinking the pane): a press opens one there.
+      let rows = 40
+      let folded = await agentsTab($, surface, 90, rows)
+      while ((await agentsLayout(folded)) !== 'folded' && rows > 12) {
+        await folded.unmount()
+        rows -= 1
+        folded = await agentsTab($, surface, 90, rows)
+      }
+      expect(await agentsLayout(folded)).toBe('folded')
+      expect(await keysOf(folded)).not.toContain('t-4')
+      await folded.press({ key: 'group-verify' })
+      // Open, the card shortened as it was (it scrolls where it runs past the pane); kept as the compact view keeps it.
+      expect(Object.fromEntries(await drawnRows(folded))['group-verify']).toMatch(/^✓ ▾ verify ×4/)
+      expect(await folded.find({ type: 'Button', key: 'processed' })).toBeDefined()
+      expect(has(await folded.findAll({ type: 'Text' }), /^Zeitleiste/)).toBe(true)
+      expect(await keysOf(folded)).toContain('t-4')
+      expect(written.at(-1)).toEqual({ shape: 'noxdeck/3', value: { closed: [], opened: ['verify'] } })
+      await folded.press({ key: 'group-verify' })
+      expect(await keysOf(folded)).not.toContain('t-4')
+      // The running group folds there as in the full card.
+      await folded.press({ key: 'group-live:verify' })
+      expect(Object.fromEntries(await drawnRows(folded))['group-live:verify']).toMatch(/^◉ ▸ verify ×5 /)
+      expect(await keysOf(folded)).not.toContain('t-8')
+      await folded.press({ key: 'group-live:verify' })
+      expect(await keysOf(folded)).toContain('t-8')
+      expect(written.at(-1)).toEqual({ shape: 'noxdeck/3', value: { closed: [], opened: [] } })
+      await folded.unmount()
+    }
+  })
+
+  test('agents of no run: the card is shortened in this order as the pane shrinks: running agents a line each, then the finished groups closed, then no timeline; the compact view last', { timeoutMs: 15_000 }, async ($, on) => {
+    await toolSession($, on)
+    for (const surface of SURFACES) {
+      for (const columns of [48, 90]) {
+        const seen: string[] = []
+        for (let rows = 80; rows >= 6; rows -= 1) {
+          const ui = await agentsTab($, surface, columns, rows)
+          const layout = await agentsLayout(ui)
+          if (seen.at(-1) !== layout) seen.push(layout)
+          await ui.unmount()
+        }
+        // Each step once, in this order, each only where the one before does not fit.
+        expect(seen).toEqual(['full', 'lines', 'folded', 'untimed', 'compact'])
+      }
+    }
+  })
+
+  test('agents of no run: ▸ and ▾ fold, nothing else: a running agent\'s last call after →, in the full card, shortened and in the compact view', async ($, on) => {
+    const { idOf } = await toolSession($, on)
+    const id = idOf('verify:hat#0')
+    for (const surface of SURFACES) {
+      // The compact view at 13 rows (the desktop's frame takes one more): its running group open by itself (version 1.1).
+      for (const rows of [80, 40, surface === 'terminal' ? 13 : 14]) {
+        const ui = await agentsTab($, surface, 90, rows)
+        if (rows < 40) await ui.press({ key: 'group-verify' })
+        const texts = await ui.findAll({ type: 'Text' })
+        // A fold mark only on a group's head and the pots' head.
+        for (const found of await ui.findAll({ type: 'Button' })) {
+          if (/[▸▾]/.test(found.text)) expect(found.key).toMatch(/^(group-|processed$)/)
+        }
+        expect(has(texts, /[▸▾] *(Bash|Read)/)).toBe(false)
+        expect(has(texts, /→ Bash/)).toBe(true)
+        expect((await ui.find({ type: 'Button', key: id }))?.text).toMatch(rows === 80 ? /^ {2}◉ hat#0 / : /→ Bash/)
+        if (rows < 40) await ui.press({ key: 'group-verify' })
+        await ui.unmount()
+      }
+    }
+  })
+
+  test('agents of no run: a press on a group\'s head turns that group alone, at every height from 40 rows down to the compact view: it shows what it opened; the layout and the other heads stay', { timeoutMs: 60_000 }, async ($, on) => {
+    await toolSession($, on)
+    // Each head's agents, by their ids.
+    const membersOf: Readonly<Record<string, readonly string[]>> = {
+      'group-live:verify': ['t-8', 't-9', 't-10', 't-11', 't-12'],
+      'group-verify': ['t-4', 't-5', 't-6', 't-7'],
+      'group-check': ['t-0', 't-1', 't-2', 't-3'],
+    }
+    const heads = Object.keys(membersOf)
+    const markOf = (text: string | undefined) => text?.slice(0, 3)
+    // The layout apart from the folds the press turns: lines and folded tell the finished heads' marks, which are checked one by one.
+    const shapeOf = async (ui: Parameters<typeof agentsLayout>[0]) => (await agentsLayout(ui)).replace(/^folded$/, 'lines').replace(/^untimed, open$/, 'untimed')
+    for (const surface of SURFACES) {
+      // In the compact view the running group's agents take the rows before the finished (version 1.1): there the tests after this one press.
+      for (let rows = 40; rows >= 12; rows -= 1) {
+        const ui = await agentsTab($, surface, 90, rows)
+        const layout = await shapeOf(ui)
+        if (layout === 'compact') {
+          await ui.unmount()
+          break
+        }
+        for (const key of heads) {
+          const before = Object.fromEntries(await drawnRows(ui))
+          expect(before[key]).toBeDefined()
+          const wasOpen = /^. ▾/.test(before[key] ?? '')
+          await ui.press({ key })
+          const after = Object.fromEntries(await drawnRows(ui))
+          expect(await shapeOf(ui)).toBe(layout)
+          expect(after[key]).toMatch(wasOpen ? /^. ▸ / : /^. ▾ /)
+          for (const other of heads.filter(one => one !== key)) expect(markOf(after[other])).toBe(markOf(before[other]))
+          const shown = (membersOf[key] ?? []).filter(id => after[id] !== undefined)
+          if (wasOpen) expect(shown).toEqual([])
+          else expect(shown.length).toBeGreaterThan(0)
+          // Pressed again: as it was.
+          await ui.press({ key })
+          expect(Object.fromEntries(await drawnRows(ui))).toEqual(before)
+        }
+        await ui.unmount()
+      }
+    }
+  })
+
+  test('agents of no run: in the narrowest panes a running agent\'s line keeps its figures whole: the indent and the name give way, as a group\'s head keeps its count and figures', async ($, on) => {
+    const { clock } = await toolSession($, on)
+    for (const surface of SURFACES) {
+      for (const columns of [24, 26, 28, 30, 36]) {
+        const width = columns - 8
+        const ui = await agentsTab($, surface, columns, 40)
+        expect(await agentsLayout(ui)).not.toBe('compact')
+        const rows = Object.fromEntries(await drawnRows(ui))
+        for (const id of ['t-8', 't-12']) {
+          expect(rows[id]).toMatch(/0:06 · 100k( →.*)?$/)
+          expect(cellsOf(rows[id] ?? '')).toBeLessThanOrEqual(width)
+        }
+        await ui.unmount()
+        const short = await agentsTab($, surface, columns, 12)
+        expect(await agentsLayout(short)).toBe('compact')
+        // The running group closed by a press, as it showed before 1.1: its head and the finished ones in the rows.
+        await short.press({ key: 'group-live:verify' })
+        const lines = Object.fromEntries(await drawnRows(short))
+        // Its time gives way where four cells of its words leave no room for it; at 36 columns it stays.
+        expect(lines['group-live:verify']).toMatch(/^◉ ▸ (\S+ ×5 500k|\S{4,} ×5 0:06 · 500k)$/)
+        if (columns >= 36) expect(lines['group-live:verify']).toMatch(/×5 0:06 · 500k$/)
+        expect(lines['group-verify']).toMatch(/×4 400k$/)
+        await short.press({ key: 'group-live:verify' })
+        await short.unmount()
+      }
+    }
+    // An hour on: 14 cells of figures (1:00:06 · 100k). At 24 columns the indent and the name give way; at 20 cells of card the time too.
+    for (let i = 0; i < 60; i += 1) await clock.advance(60_000)
+    for (const surface of SURFACES) {
+      const ui = await agentsTab($, surface, 24, 40)
+      const rows = Object.fromEntries(await drawnRows(ui))
+      expect(rows['t-8']).toBe('◉ 1:00:06 · 100k')
+      await ui.unmount()
+      // The full card's running head: its words cut, at 28 columns left out, its glyph, fold mark, count and figures whole.
+      for (const [columns, head] of [[28, /^◉ ▾ ×5 +500k 1:00:06$/], [32, /^◉ ▾ \S+ ×5 +500k 1:00:06$/]] as const) {
+        const wider = await agentsTab($, surface, columns, 40)
+        expect(Object.fromEntries(await drawnRows(wider))['group-live:verify']).toMatch(head)
+        await wider.unmount()
+      }
+    }
+  })
+
+  test('agents of no run: in the shortest panes the compact view keeps every head to press, the counts giving way first; open, the running group\'s agents come before the finished heads', async ($, on) => {
+    await toolSession($, on)
+    const heads = ['group-live:verify', 'group-verify', 'group-check']
+    for (const surface of SURFACES) {
+      for (const rows of surface === 'terminal' ? [8, 9] : [9, 10]) {
+        const ui = await agentsTab($, surface, 90, rows)
+        expect(await agentsLayout(ui)).toBe('compact')
+        // Open by itself (version 1.1): its head and running agents in the rows, no finished head among them.
+        const running = (await drawnRows(ui)).map(([one]) => one)
+        expect(running).toContain('group-live:verify')
+        expect(running).toContain('t-8')
+        expect(running).not.toContain('group-verify')
+        // Closed by a press, as it showed before 1.1: every head to press, whichever is opened.
+        await ui.press({ key: 'group-live:verify' })
+        for (const key of heads.slice(1)) {
+          await ui.press({ key })
+          const keys = (await drawnRows(ui)).map(([one]) => one)
+          expect(keys).toEqual(expect.arrayContaining(heads))
+          await ui.press({ key })
+        }
+        await ui.press({ key: 'group-live:verify' })
+        await ui.unmount()
+      }
+    }
+  })
+
+  test('agents of no run: the compact view: the agent in the main view keeps its line longest in an open group, and where it is left out its open head is marked', async ($, on) => {
+    await toolSession($, on)
+    for (const surface of SURFACES) {
+      // diff#3, the last of verify's: with a row too few its line stays, an agent before it gives way.
+      const viewed = await agentsTabViewing($, surface, 't-7', 90, surface === 'terminal' ? 13 : 14)
+      // The running group closed by a press, as it showed before 1.1.
+      await viewed.press({ key: 'group-live:verify' })
+      await viewed.press({ key: 'group-verify' })
+      const rows = Object.fromEntries(await drawnRows(viewed))
+      expect(rows['t-7']).toBe('    diff#3 100k')
+      expect(Object.keys(rows).filter(key => /^t-[4-6]$/.test(key)).length).toBeLessThan(3)
+      expect(await markedTexts(viewed)).toContain('diff#3 100k')
+      // The running group opened again: its running agents come before diff#3 and the finished heads (version 1.1).
+      await viewed.press({ key: 'group-live:verify' })
+      const opened = Object.fromEntries(await drawnRows(viewed))
+      expect(opened['t-8']).toBe('  ◉ hat#0 0:06 · 100k → Bash')
+      expect(opened['t-7']).toBeUndefined()
+      expect(opened['group-verify']).toBeUndefined()
+      // Closed again, as it showed before 1.1.
+      await viewed.press({ key: 'group-live:verify' })
+      await viewed.unmount()
+      // Two rows fewer (the running group closed now, not open as before 1.1): no row left for it, and its head is marked in its place.
+      const fewer = await agentsTabViewing($, surface, 't-7', 90, surface === 'terminal' ? 11 : 12)
+      const rows2 = Object.fromEntries(await drawnRows(fewer))
+      expect(rows2['t-7']).toBeUndefined()
       expect(rows2['group-verify']).toBe('✓ ▾ verify ×4 400k')
       expect(await markedTexts(fewer)).toContain('verify ×4 400k')
-      await fewer.press({ key: 'group-live:verify' })
       await fewer.press({ key: 'group-verify' })
+      await fewer.press({ key: 'group-live:verify' })
       await fewer.unmount()
     }
   })
