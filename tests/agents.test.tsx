@@ -2225,22 +2225,25 @@ describe('Agents: tokens, model and activity per agent', () => {
   test('the compact view: the agent in the main view keeps its line longest under a run\'s opened line of finished agents, and where it is left out that line is marked', async ($, on) => {
     await workflowSession($, on)
     for (const surface of SURFACES) {
-      // diff#3, the last of the eight: with a row too few for all its line stays, the agents before it give way.
-      const viewed = await agentsTabViewing($, surface, 'wf-7', 90, surface === 'terminal' ? 15 : 16)
+      // diff#3, the last of the eight: with rows for its line and the count under it, its line stays, the agents before it give way.
+      const viewed = await agentsTabViewing($, surface, 'wf-7', 90, surface === 'terminal' ? 16 : 17)
       await viewed.press({ key: 'group-done:wf_1' })
       const rows = Object.fromEntries(await drawnRows(viewed))
       expect(rows['wf-7']).toBe('      verify:diff#3 100k')
       expect(Object.keys(rows).filter(key => /^wf-[4-6]$/.test(key)).length).toBeLessThan(3)
+      // The seven before it counted under it, never left out unsaid.
+      expect(has(await viewed.findAll({ type: 'Text' }), /^ {6}\+7 weitere$/)).toBe(true)
       expect(await markedTexts(viewed)).toContain('verify:diff#3 100k')
       // The running agents all before it: every one still there.
       for (const id of ['wf-8', 'wf-9', 'wf-10', 'wf-11', 'wf-12']) expect(rows[id]).toBeDefined()
       await viewed.unmount()
       // A row fewer: no row left for it, and its line is marked in its place.
-      const fewer = await agentsTabViewing($, surface, 'wf-7', 90, surface === 'terminal' ? 14 : 15)
+      const fewer = await agentsTabViewing($, surface, 'wf-7', 90, surface === 'terminal' ? 15 : 16)
       const rows2 = Object.fromEntries(await drawnRows(fewer))
       expect(rows2['wf-7']).toBeUndefined()
       expect(rows2['group-done:wf_1']).toBe('  ✓ ▾ 8 fertig 800k')
       expect(await markedTexts(fewer)).toContain('8 fertig 800k')
+      expect(has(await fewer.findAll({ type: 'Text' }), /^ {6}\+8 weitere$/)).toBe(true)
       await fewer.press({ key: 'group-done:wf_1' })
       await fewer.unmount()
     }

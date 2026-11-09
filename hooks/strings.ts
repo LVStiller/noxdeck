@@ -176,6 +176,8 @@ export type Strings = {
     runDone: (count: number) => string
     /** Under an opened run: its agents no longer in the list of 50, counted. */
     runGone: (count: number) => string
+    /** Under an opened run whose agents the rows do not all hold: those not drawn, the ones no longer in the list included, counted. */
+    runMore: (count: number) => string
     /** The last line of the finished: the older runs and agents without a run that have no line, and what they processed. */
     older: (runs: number, agents: number, processed: string) => string
     note: string
@@ -358,6 +360,7 @@ const de: Strings = {
     runUnnamed: id => `Workflow ${id}`,
     runDone: count => `${count} fertig`,
     runGone: count => `+${count} nicht mehr in der Liste`,
+    runMore: count => `+${count} weitere`,
     older: (runs, agents, processed) => {
       const runsPart = `${runs} ${runs === 1 ? 'älterer Lauf' : 'ältere Läufe'}`
       const agentsPart = `${agents} ${runs > 0 ? '' : agents === 1 ? 'älterer ' : 'ältere '}${agents === 1 ? 'Agent' : 'Agents'}`
@@ -521,6 +524,7 @@ const en: Strings = {
     runUnnamed: id => `Workflow ${id}`,
     runDone: count => `${count} done`,
     runGone: count => `+${count} no longer in the list`,
+    runMore: count => `+${count} more`,
     older: (runs, agents, processed) => {
       const runsPart = `${runs} older ${runs === 1 ? 'run' : 'runs'}`
       const agentsPart = `${agents} ${runs > 0 ? '' : 'older '}${agents === 1 ? 'agent' : 'agents'}`

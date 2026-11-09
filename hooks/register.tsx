@@ -140,10 +140,10 @@ const CUES_SHAPE = { shape: 'noxdeck/4' } as const
 const RADAR_SHAPE = { shape: 'noxdeck/5' } as const
 /** The usage track's shape since it keeps no peak (version 0.13). */
 const USAGE_SHAPE = { shape: 'noxdeck/7' } as const
-/** The loops' tokens and work by agentId, the workflow runs and the agents that left the list, and the Agents tab's snapshot of them (version 1.1; 0.14.1 kept noxdeck/9). */
-const LEDGER_SHAPE = { shape: 'noxdeck/10' } as const
-/** The agents' rows since each names its workflow run (version 1.1; earlier ones kept the shared noxdeck/3). */
-const AGENTS_SHAPE = { shape: 'noxdeck/10' } as const
+/** The loops' tokens and work by agentId, the workflow runs and the agents that left the list, and the Agents tab's snapshot of them, its rows with their place in their run (version 1.1; 0.14.1 kept noxdeck/9). */
+const LEDGER_SHAPE = { shape: 'noxdeck/11' } as const
+/** The agents' rows since each names its workflow run and its place in it (version 1.1; earlier ones kept the shared noxdeck/3). */
+const AGENTS_SHAPE = { shape: 'noxdeck/11' } as const
 
 const tab = atom({ plugin: 'noxdeck', key: 'tab' } as const, 'live', SHAPE)
 const plan = atom({ plugin: 'noxdeck', key: 'plan' } as const, [], SHAPE)
@@ -290,6 +290,7 @@ function newAgent(id: string, at: number, fields: Partial<AgentRow> = {}): Agent
     isGone: false,
     firstSeen: at,
     run: null,
+    index: null,
     ...fields,
   }
 }
@@ -443,7 +444,17 @@ const agentsAsking = new Set<string>()
 const SPAWN_WAIT_MS = 30_000
 
 /** A spawn waiting to be named: its prompt only as a hash and a length, white space out, to tell its loop's first turn by; a workflow's with its run. */
-type PendingSpawn = { promptKey: string; promptLength: number; isWorkflow: boolean; run: string | null; description: string; type: string; at: number }
+type PendingSpawn = {
+  promptKey: string
+  promptLength: number
+  isWorkflow: boolean
+  run: string | null
+  /** Its place among its run's `agent()` calls; null for any other spawn. */
+  index: number | null
+  description: string
+  type: string
+  at: number
+}
 
 // agent.spawn passes its answer on unread, so a new agent's id comes from
 // elsewhere: the agent list names a subagent of the Agent tool; one it never
@@ -731,6 +742,7 @@ function noteSpawn($: EngineInterface, spawned: Frozen<Args<'agent.spawn'>>): Pr
       isWorkflow: spawned.workflow !== undefined,
       // The run's id is empty only outside a real run.
       run: spawned.workflow === undefined || spawned.workflow.runId === '' ? null : spawned.workflow.runId,
+      index: spawned.workflow?.agentIndex ?? null,
       description: maskSecrets(spawned.description),
       type: spawned.subagentType,
       at,
@@ -1126,7 +1138,7 @@ export const register: Register = (on, options) => {
           rows =>
             upsertAgent(rows, id, at, row => ({
               ...row,
-              ...(spawn === undefined ? {} : { description: spawn.description, type: spawn.type, run: spawn.run }),
+              ...(spawn === undefined ? {} : { description: spawn.description, type: spawn.type, run: spawn.run, index: spawn.index }),
               turnStartedAt: at,
               isTimed: true,
               endReason: null,

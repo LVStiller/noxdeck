@@ -97,6 +97,32 @@ async function session($: Engine, on: On, tokens: Readonly<Record<string, number
   }
 }
 
+type Session = Awaited<ReturnType<typeof session>>
+
+/** The agents of the mass run: m1 to m45, each having processed its number in thousands (ok:7 7k), so a figure tells its line. */
+const MASS_TOKENS: Readonly<Record<string, number>> = Object.fromEntries(Array.from({ length: 45 }, (_, i) => [`m${i + 1}`, (i + 1) * K]))
+
+/**
+ * The run of the user's live check (2026-11-09), `nox-test-masse`: 45
+ * agents, ok:1 to ok:45, each `agentIndex` the number in its name; their
+ * loops start in another order, the even ones first, as siblings held for
+ * their leader's first answer do. All finished 30 s later.
+ */
+async function massRun(s: Session) {
+  await s.launch('wf_m', 'nox-test-masse')
+  const evens = Array.from({ length: 22 }, (_, i) => 2 * (i + 1))
+  const odds = Array.from({ length: 23 }, (_, i) => 2 * i + 1)
+  for (const i of [...evens, ...odds]) {
+    await s.runAgent('wf_m', `m${i}`, `ok:${i}`, i)
+    await s.clock.advance(100)
+  }
+  await s.clock.advance(30_000)
+  for (const i of [...evens, ...odds]) await s.finish(`m${i}`)
+}
+
+/** ok:1 to ok:n, as their lines name them. */
+const okNames = (n: number) => Array.from({ length: n }, (_, i) => `ok:${i + 1}`)
+
 /** The pane on the Agents tab, docked, wide and tall enough for the full card unless told otherwise. */
 async function agentsTab($: Engine, surface: (typeof SURFACES)[number], columns = 90, rows = 80) {
   const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns: columns, scroll: { offset: 0, bodyRows: rows } }, surface })
@@ -171,10 +197,11 @@ function draw(node: Node, room: number): Block {
   return { rows: body.rows.map(row => ' '.repeat(inset) + row), width: typeof props.width === 'number' ? props.width : body.width + 2 * inset }
 }
 
-/** The Agents tab inline in a terminal of `terminal` columns, `rows` rows of body: its rows as drawn. */
-async function inlineRows($: Engine, terminal: number, rows: number): Promise<string[]> {
+/** The Agents tab inline in a terminal of `terminal` columns, `rows` rows of body, after a press on `press` where one is given: its rows as drawn. */
+async function inlineRows($: Engine, terminal: number, rows: number, press?: string): Promise<string[]> {
   const ui = await $.ui.mount({ ...inline(terminal, rows), surface: 'terminal' })
   await ui.press({ key: 'tab-agents' })
+  if (press !== undefined) await ui.press({ key: press })
   const drawn = draw((await ui.drawn()) as Node, terminal - FRAME_COLUMNS).rows.map(row => row.replaceAll(' ', ' ').trimEnd())
   for (const row of drawn) expect(`${cellsOf(row) <= terminal - FRAME_COLUMNS} ${row}`).toBe(`true ${row}`)
   await ui.unmount()
@@ -407,7 +434,7 @@ describe('Agents by workflow run', () => {
     await ui.unmount()
   })
 
-  test('the compact view from about 100 columns: the finished in two columns, the newest first, row by row; below that in one', async ($, on) => {
+  test('the compact view from about 100 columns: the finished in two columns, filled down the first, then down the second, the newest first, their figures right-aligned; below that in one', async ($, on) => {
     const s = await session($, on)
     for (const i of [0, 1, 2, 3, 4]) {
       await s.launch(`wf_${i}`, `run-${i}`)
@@ -417,14 +444,14 @@ describe('Agents by workflow run', () => {
     }
     await s.runAgent('wf_live', 'live1', 'watch:logs')
     await s.clock.advance(1000)
-    // 100 columns: the body 96, the view's 94 in two columns of 45 with ` │ ` between them.
+    // 100 columns: the body 96, the view's 94 in two columns of 45 with ` │ ` between them; run-4 and run-3 down the first, run-2 and the older line down the second.
     const wide = await inlineRows($, 100, 6)
     expect(wide.slice(1)).toEqual([
       ' AGENTS 1 ◉ · 5 ✓ · verarbeitet 6k',
       ' ◉ Workflow wf_live ×1 0:01 · 1k',
       '   ◉ watch:logs 0:01 · 1k',
-      ` ${'✓ ▸ run-4 ×1 0:01 · 1k'.padEnd(45)} │ ✓ ▸ run-3 ×1 0:01 · 1k`,
-      ` ${'✓ ▸ run-2 ×1 0:01 · 1k'.padEnd(45)} │ +2 ältere Läufe · 2k`,
+      ` ${'✓ ▸ run-4 ×1'.padEnd(38)}1k 0:01 │ ${'✓ ▸ run-2 ×1'.padEnd(38)}1k 0:01`,
+      ` ${'✓ ▸ run-3 ×1'.padEnd(38)}1k 0:01 │ +2 ältere Läufe · 2k`,
     ])
     // 90 columns: one column, the same lines one under another as far as they go.
     const narrow = await inlineRows($, 90, 6)
@@ -435,6 +462,198 @@ describe('Agents by workflow run', () => {
       ' ✓ ▸ run-4 ×1 0:01 · 1k',
       ' +4 ältere Läufe · 4k',
     ])
+  })
+
+  test('an opened run of 45 agents in two columns stands whole in one: its agents in the order its script started them, those with no row counted („+38 weitere“); at 100 to 109 columns no line wraps, each figure in its entry\'s line, right-aligned in its column', async ($, on) => {
+    const s = await session($, on, MASS_TOKENS)
+    await s.toolAgent('x1', 'Explore Ordnerstruktur')
+    await s.finish('x1')
+    await s.launch('wf_a', 'run-a')
+    await s.runAgent('wf_a', 'a1', 'step:a')
+    await s.clock.advance(12 * 60_000)
+    await s.finish('a1')
+    await massRun(s)
+    await s.launch('wf_c', 'run-c')
+    await s.runAgent('wf_c', 'c1', 'step:c')
+    await s.clock.advance(1000)
+    await s.finish('c1')
+    for (let terminal = 100; terminal <= 109; terminal += 1) {
+      // The run opened once, at 100 columns: the compact view keeps it open at every width after.
+      const drawn = await inlineRows($, terminal, 12, terminal === 100 ? 'group-run:wf_m' : undefined)
+      expect(drawn[1]).toBe(' AGENTS 48 ✓ · verarbeitet 1M')
+      // The body's 12 rows: the head, then ten rows of two columns.
+      const body = drawn.slice(2)
+      expect(body).toHaveLength(10)
+      const cell = Math.floor((terminal - FRAME_COLUMNS - 2 - 3) / 2)
+      // No line wraps: in every row the first column ends where ` │ ` stands, the second no wider than its own.
+      for (const row of body) expect(row.indexOf(' │')).toBe(1 + cell)
+      const first = body.map(row => row.slice(1, 1 + cell))
+      const second = body.map(row => row.slice(cell + 4))
+      for (const one of second) expect(cellsOf(one)).toBeLessThanOrEqual(cell)
+      // Down the first column: the newest run, then the opened one whole: its head, its first seven agents in
+      // their script's order (their loops started the even ones first), the other 38 counted under them.
+      expect(first[0]).toMatch(/^✓ ▸ run-c ×1 /)
+      expect(first[1]).toMatch(/^✓ ▾ nox-test-masse ×45 /)
+      expect(first.slice(2, 9).map(one => one.trim().split(/ +/)[0])).toEqual(okNames(7))
+      expect(first[9]?.trimEnd()).toBe('    +38 weitere')
+      // None of its agents in the second column: it goes on down from the top with the runs after it.
+      expect(second.some(one => one.includes('ok:'))).toBe(false)
+      expect(second[0]).toMatch(/^✓ ▸ run-a ×1 /)
+      expect(second[1]).toMatch(/^✓ Explore Ordnerstruktur /)
+      expect(second.slice(2).every(one => one.trim() === '')).toBe(true)
+      // Each agent's figures in its own line: ok:7 processed 7k; the time in that line too.
+      for (const [i, one] of first.slice(2, 9).entries()) expect(one).toMatch(new RegExp(`^ {4}ok:${i + 1} +${i + 1}k +0:3\\d$`))
+      // Right-aligned in each column: every time ends where its column does, every figure processed where the others do.
+      for (const column of [first, second]) {
+        const figured = column.filter(one => /\d+:\d\d$/.test(one))
+        expect(figured.length).toBeGreaterThan(1)
+        for (const one of figured) expect(cellsOf(one)).toBe(cell)
+        expect(new Set(figured.map(one => one.replace(/ +\d+:\d\d$/, '').length)).size).toBe(1)
+      }
+      // run-a's 12:00 and run-c's 0:01 in one column of times: 0:01 one cell further in.
+      expect(second[0]).toMatch(/ 1k 12:00$/)
+      expect(first[0]).toMatch(/ 1k {2}0:01$/)
+    }
+  })
+
+  test('two columns: an opened run whose column has not the rows for its head, an agent and its count begins atop the second; for the older line it gives up an agent', async ($, on) => {
+    // 50 agents: every one still in the list.
+    const s = await session($, on, MASS_TOKENS)
+    await s.launch('wf_a', 'run-a')
+    await s.runAgent('wf_a', 'a1', 'step:a')
+    await s.clock.advance(1000)
+    await s.finish('a1')
+    await massRun(s)
+    // Four runs after it.
+    for (const i of [1, 2, 3, 4]) {
+      await s.launch(`wf_${i}`, `run-${i}`)
+      await s.runAgent(`wf_${i}`, `r${i}`, `step:${i}`)
+      await s.clock.advance(1000)
+      await s.finish(`r${i}`)
+    }
+    // 8 rows inline: the head, then six rows of two columns.
+    const body = (await inlineRows($, 100, 8, 'group-run:wf_m')).slice(2)
+    expect(body).toHaveLength(6)
+    const first = body.map(row => row.slice(1, 46).trimEnd())
+    const second = body.map(row => row.slice(49))
+    // The first column: the four runs, the newest first; two rows left, no room for the opened run's head, an agent and its count.
+    expect(first.slice(0, 4).map(one => one.split(/ +/)[2])).toEqual(['run-4', 'run-3', 'run-2', 'run-1'])
+    expect(first.slice(4)).toEqual(['', ''])
+    // The second: the opened run whole from its top, its agents in their script's order, one given up for the older line (run-a) under it.
+    expect(second[0]).toMatch(/^✓ ▾ nox-test-masse ×45 /)
+    expect(second.slice(1, 4).map(one => one.trim().split(/ +/)[0])).toEqual(okNames(3))
+    expect(second[4]).toBe('    +42 weitere')
+    expect(second[5]).toBe('+1 älterer Lauf · 1k')
+  })
+
+  test('a run\'s agents in the order its script started them, whichever loop started first: in the full card and in one column, those with no row counted under them', async ($, on) => {
+    const s = await session($, on, MASS_TOKENS)
+    await massRun(s)
+    for (const surface of SURFACES) {
+      // The full card: all 45 in their script's order.
+      const ui = await agentsTab($, surface)
+      await ui.press({ key: 'group-run:wf_m' })
+      const keys = (await drawnRows(ui)).map(([key]) => key).filter(key => /^m\d+$/.test(key))
+      expect(keys).toEqual(Array.from({ length: 45 }, (_, i) => `m${i + 1}`))
+      await ui.press({ key: 'group-run:wf_m' })
+      await ui.unmount()
+    }
+    // The compact view in one column, inline at 90 columns: its head, its first eight agents in their script's order, the rest counted.
+    const body = (await inlineRows($, 90, 12, 'group-run:wf_m')).slice(2)
+    expect(body[0]).toMatch(/^ ✓ ▾ nox-test-masse ×45 /)
+    expect(body.slice(1, 9).map(row => row.trim().split(' ')[0])).toEqual(okNames(8))
+    expect(body.slice(1, 9).every((row, i) => row === `     ok:${i + 1} ${i + 1}k`)).toBe(true)
+    expect(body[9]).toBe('     +37 weitere')
+    expect(body).toHaveLength(10)
+  })
+
+  test('one column: an opened run\'s count under its agents takes in those no longer in the list', async ($, on) => {
+    // Sixty agents, the ten oldest no longer in the list.
+    const s = await session($, on)
+    await s.launch('wf_big', 'bulk')
+    for (let i = 0; i < 60; i += 1) {
+      await s.runAgent('wf_big', `b${i}`, `bulk:f${i}`, i + 1)
+      await s.finish(`b${i}`)
+    }
+    // Inline at 90 columns: the run's head, the eight oldest still in the list, then the 52 others: 42 with no row, 10 no longer in the list.
+    const body = (await inlineRows($, 90, 12, 'group-run:wf_big')).slice(2)
+    expect(body[0]).toMatch(/^ ✓ ▾ bulk ×60 /)
+    expect(body.slice(1, 9).map(row => row.trim().split(' ')[0])).toEqual(Array.from({ length: 8 }, (_, i) => `bulk:f${10 + i}`))
+    expect(body[9]).toBe('     +52 weitere')
+  })
+
+  test('two columns: as few rows as hold every line, the first column filled first', async ($, on) => {
+    const s = await session($, on)
+    for (const i of [1, 2, 3]) {
+      await s.launch(`wf_${i}`, `run-${i}`)
+      await s.runAgent(`wf_${i}`, `r${i}`, `step:${i}`)
+      await s.clock.advance(1000)
+      await s.finish(`r${i}`)
+    }
+    // 12 rows inline, three runs: two rows, not three down the first column.
+    const body = (await inlineRows($, 100, 12)).slice(2)
+    expect(body).toEqual([` ${'✓ ▸ run-3 ×1'.padEnd(38)}1k 0:01 │ ${'✓ ▸ run-1 ×1'.padEnd(38)}1k 0:01`, ` ${'✓ ▸ run-2 ×1'.padEnd(38)}1k 0:01 │`])
+  })
+
+  test('two columns: an opened run that the lines before it would leave no place keeps one, the lowest of them giving way to the older line', async ($, on) => {
+    // 50 agents: every one still in the list.
+    const s = await session($, on, MASS_TOKENS)
+    await massRun(s)
+    for (const i of [1, 2, 3, 4, 5]) {
+      await s.launch(`wf_${i}`, `run-${i}`)
+      await s.runAgent(`wf_${i}`, `r${i}`, `step:${i}`)
+      await s.clock.advance(1000)
+      await s.finish(`r${i}`)
+    }
+    // Opened where the rows hold it, then 5 rows inline: three rows of two columns, five newer runs before it.
+    await inlineRows($, 100, 12, 'group-run:wf_m')
+    const body = (await inlineRows($, 100, 5)).slice(2)
+    const first = body.map(row => row.slice(1, 46).trimEnd())
+    const second = body.map(row => row.slice(49))
+    expect(first.map(one => one.split(/ +/)[2])).toEqual(['run-5', 'run-4', 'run-3'])
+    // run-2 and run-1 give way: the opened run's head and its count, the older line under them.
+    expect(second[0]).toMatch(/^✓ ▾ nox-test-masse ×45 /)
+    expect(second.slice(1)).toEqual(['    +45 weitere', '+2 ältere Läufe · 2k'])
+  })
+
+  test('one column: with two runs opened, an agent the count would have taken the row of comes back', async ($, on) => {
+    const s = await session($, on)
+    await s.launch('wf_b', 'run-b')
+    for (const i of [1, 2, 3]) await s.runAgent('wf_b', `b${i}`, `b:${i}`, i)
+    await s.clock.advance(1000)
+    for (const i of [1, 2, 3]) await s.finish(`b${i}`)
+    await s.launch('wf_a', 'run-a')
+    for (const i of [1, 2]) await s.runAgent('wf_a', `a${i}`, `a:${i}`, i)
+    await s.clock.advance(1000)
+    for (const i of [1, 2]) await s.finish(`a${i}`)
+    await inlineRows($, 90, 12, 'group-run:wf_a')
+    await inlineRows($, 90, 12, 'group-run:wf_b')
+    // Five rows for seven lines: run-a whole, its two agents; run-b's three counted under its head.
+    const body = (await inlineRows($, 90, 7)).slice(2)
+    expect(body).toEqual([' ✓ ▾ run-a ×2 0:01 · 2k', '     a:1 1k', '     a:2 1k', ' ✓ ▾ run-b ×3 0:01 · 3k', '     +3 weitere'])
+  })
+
+  test('an opened run missing only agents no longer in the list says so: „+2 nicht mehr in der Liste“', async ($, on) => {
+    const s = await session($, on)
+    // Three agents of an older run, then 49 of a newer one: the two oldest leave the list.
+    await s.launch('wf_x', 'run-x')
+    for (const i of [0, 1, 2]) await s.runAgent('wf_x', `x${i}`, `x:${i}`, i + 1)
+    await s.clock.advance(1000)
+    for (const i of [0, 1, 2]) await s.finish(`x${i}`)
+    await s.launch('wf_y', 'run-y')
+    for (let i = 0; i < 49; i += 1) {
+      await s.runAgent('wf_y', `y${i}`, `y:${i}`, i + 1)
+      await s.finish(`y${i}`)
+    }
+    const body = (await inlineRows($, 90, 12, 'group-run:wf_x')).slice(2)
+    expect(body.slice(1)).toEqual([' ✓ ▾ run-x ×3 0:01 · 3k', '     x:2 1k', '     +2 nicht mehr in der Liste'])
+  })
+
+  test('in English: an opened run\'s agents with no row, „+37 more“', { options: { language: 'en' } }, async ($, on) => {
+    const s = await session($, on, MASS_TOKENS)
+    await massRun(s)
+    const body = (await inlineRows($, 100, 12, 'group-run:wf_m')).slice(2)
+    expect(body.map(row => row.trimEnd()).at(-1)).toBe('     +37 more')
   })
 
   test('a running agent whose call has no room beside its name shows it in a line under it, with how long ago it started; with room, in its line', async ($, on) => {

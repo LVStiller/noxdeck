@@ -11,7 +11,7 @@ noxdeck is a Claude Code mod. It runs inside Claude Code on your machine and onl
 
 ## What it processes
 
-To draw its pane, noxdeck reads what Claude Code passes to its hooks during the session: tool calls (the tool, a command or file path, Claude's plan steps), the names of changed files, the project folder, token counts and context usage, the usage limits (5-hour, weekly), and the subagents' names, types and models, and the names of workflow runs. It reads one setting, Reduce motion. All of it is processed locally, in memory, and only to be shown in the pane. Secrets in the commands and texts it shows (tokens, keys, passwords) are masked. A subagent's prompt is kept only as a hash and its length, briefly, to tell which agent it started.
+To draw its pane, noxdeck reads what Claude Code passes to its hooks during the session: tool calls (the tool, a command or file path, Claude's plan steps), the names of changed files, the project folder, token counts and context usage, the usage limits (5-hour, weekly), and the subagents' names, types and models, and the names of workflow runs with each agent's place in its run. It reads one setting, Reduce motion. All of it is processed locally, in memory, and only to be shown in the pane. Secrets in the commands and texts it shows (tokens, keys, passwords) are masked. A subagent's prompt is kept only as a hash and its length, briefly, to tell which agent it started.
 
 ## Where it is kept
 

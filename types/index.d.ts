@@ -319,6 +319,8 @@ export type AgentRow = {
   firstSeen: number
   /** The workflow run its spawn named (`workflow.runId`, version 1.1); null for any other agent. */
   run: string | null
+  /** Its place among its run's `agent()` calls (`workflow.agentIndex`, from 1): the order its run's line lists it in; null for any other agent. */
+  index: number | null
 }
 
 /**

@@ -1150,7 +1150,7 @@ function runSumOf(works: readonly AgentWork[], past: RunPast, live: ReadonlySet<
 function runViewsOf(ledger: AgentLedger, agents: readonly ShownAgent[], now: number): RunView[] {
   return ledger.runs
     .map(run => {
-      const members = agents.filter(one => one.row.run === run.id).sort(inStartOrder)
+      const members = agents.filter(one => one.row.run === run.id).sort(inRunOrder)
       const live = members.filter(one => !one.isEnded)
       const ended = members.filter(one => one.isEnded)
       const liveIds = new Set(live.map(one => one.row.id))
@@ -1501,6 +1501,9 @@ type AgentsView = {
 }
 
 const inStartOrder = (a: ShownAgent, b: ShownAgent) => a.row.firstSeen - b.row.firstSeen
+
+/** A run's agents in the order its script called `agent()` (ok:8 before ok:9, whichever loop started first), then as first seen. */
+const inRunOrder = (a: ShownAgent, b: ShownAgent) => (a.row.index ?? 0) - (b.row.index ?? 0) || inStartOrder(a, b)
 
 function agentsViewOf(board: AgentBoard): AgentsView {
   const { ledger, now } = board
@@ -2201,7 +2204,8 @@ export function agentsLarge(ui: Ui, board: AgentBoard, controls: AgentsControls,
  * processed, for the older line (a head its group's or its run's, an agent
  * under it none); its group's fold, and whether it is the agent in the main
  * view. An open head holding that agent keeps itself drawn marked, for when
- * the agent's line is left out.
+ * the agent's line is left out. An opened run's head, and a running run's
+ * opened line of its finished agents, carries the `tail` under its agents.
  */
 type CompactLine = {
   element: RenderElement
@@ -2219,10 +2223,36 @@ type CompactLine = {
   at: number
   isViewed: boolean
   marked?: RenderElement
+  tail?: Tail
 }
+
+/**
+ * The line under an opened run's agents while some are not drawn (version
+ * 1.1): `+38 weitere` where the rows left some out, else `+5 nicht mehr in
+ * der Liste`; `gone` how many left the list, `draw` the line for a count. In
+ * two columns an opened group of no run has one too.
+ */
+type Tail = { gone: number; draw: (count: number, isCut: boolean) => RenderElement }
 
 /** The compact view's width from which the finished stand in two columns (version 1.1): a pane of about 100 columns. */
 const TWO_COLUMNS_MIN = 94
+
+/** A finished line with the lines under it while it is open: in two columns they never part. */
+type Block = CompactLine[]
+
+/** The finished lines by block: a head with its group's lines under it, any other line alone. */
+function blocksOf(lines: readonly CompactLine[]): Block[] {
+  const blocks: Block[] = []
+  for (const line of lines) {
+    const last = blocks.at(-1)
+    if (last !== undefined && line.group !== null && last[0]?.group === line.group) last.push(line)
+    else blocks.push([line])
+  }
+  return blocks
+}
+
+/** A block in a column, in `rows` rows (an opened one's agents cut to them); null for the count line. */
+type Placed = { block: Block | null; rows: number }
 
 /**
  * The running and the finished lines in `room` rows: all where they fit;
@@ -2240,9 +2270,11 @@ const TWO_COLUMNS_MIN = 94
  * running agents (counted, `+3 ◉`), the agent in the main view among them
  * last, the running's count line, the heads last. So an opened group shows
  * its first agent while the rows hold one more, and an open head whose
- * agent in the main view was left out is marked in its place. With `cell`,
- * the finished stand in two columns of that many cells, the newest first,
- * row by row.
+ * agent in the main view was left out is marked in its place. An opened
+ * run's agents that are not drawn are counted in its tail; one left out
+ * where the tail took the row it freed comes back. With `cell`, the
+ * finished stand in two columns of that many cells (columnsIn) while the
+ * running leave them a row.
  */
 function cutLines(
   ui: Ui,
@@ -2256,28 +2288,176 @@ function cutLines(
 ): RenderElement[] {
   const { Box, Text, s } = ui
   const left = new Set<CompactLine>()
+  /** Heads whose tail gave way: none of their agents is drawn, and their own count says them. */
+  const untailed = new Set<CompactLine>()
   const isCounted = { live: true, ended: true }
   const leftOf = (lines: readonly CompactLine[]) => lines.filter(line => left.has(line))
   const keptOf = (lines: readonly CompactLine[]) => lines.filter(line => !left.has(line))
   const liveHidden = () => leftOf(live).reduce((sum, line) => sum + line.agents, 0)
+  /** Whether a line left out is counted in its head's tail, not in the finished's count line: an agent under a kept head that has one. */
+  const isTailed = (line: CompactLine, lines: readonly CompactLine[]) =>
+    line.kind === 'member' && lines.some(head => head.tail !== undefined && head.group === line.group && !left.has(head))
+  /** The agents under a head with a tail that are not drawn: those left out, those no longer in the list. */
+  const hiddenOf = (head: CompactLine, lines: readonly CompactLine[]) =>
+    (head.tail?.gone ?? 0) + lines.filter(line => line.kind === 'member' && line.group === head.group && left.has(line)).length
   /** The finished's count line as it reads with what is left out now: `+5 ✓`, or the older line with a run among it; null with nothing to count. */
   const endedCount = (): { text: string; isOlder: boolean } | null => {
     if (!isCounted.ended) return null
-    const gone = leftOf(ended)
+    const gone = leftOf(ended).filter(line => !isTailed(line, ended))
     const runs = view.older.runs + gone.filter(line => line.isRun).length
     const agents = view.older.agents + gone.reduce((sum, line) => sum + line.agents, 0)
     if (runs === 0) return agents > 0 ? { text: `${s.agents.more(agents)} ✓`, isOlder: false } : null
     const shown = liveTokens + keptOf(ended).reduce((sum, line) => sum + line.tokens, 0)
     return { text: s.agents.older(runs, agents, tokens(ui, Math.max(0, view.pot - shown))), isOlder: true }
   }
-  const endedCells = () => keptOf(ended).length + (endedCount() === null ? 0 : 1)
-  const rows = () =>
-    keptOf(live).reduce((sum, line) => sum + line.rows, 0) +
-    (isCounted.live && liveHidden() > 0 ? 1 : 0) +
-    (cell === null ? endedCells() : Math.ceil(endedCells() / 2))
+  const countElement = (count: { text: string; isOlder: boolean }) =>
+    count.isOlder ? (
+      <Text dimColor wrap="truncate-end">
+        {cutCells(count.text, cell ?? width)}
+      </Text>
+    ) : (
+      <Text dimColor>{count.text}</Text>
+    )
+  const hasTail = (head: CompactLine, lines: readonly CompactLine[]) => head.tail !== undefined && !untailed.has(head) && hiddenOf(head, lines) > 0
+  const tailRows = (lines: readonly CompactLine[]) => keptOf(lines).filter(line => hasTail(line, lines)).length
+  const liveRows = () => keptOf(live).reduce((sum, line) => sum + line.rows, 0) + tailRows(live) + (isCounted.live && liveHidden() > 0 ? 1 : 0)
+  const rows = () => liveRows() + keptOf(ended).length + tailRows(ended) + (endedCount() === null ? 0 : 1)
+  const unseenOf = () => new Set([...live, ...ended].filter(line => line.isViewed && left.has(line)).map(line => line.group))
+  const elementOf = (unseen: ReadonlySet<string | null>) => (line: CompactLine) => (line.marked !== undefined && unseen.has(line.group) ? line.marked : line.element)
+  /** The kept lines, each head's tail after the last line of its group. */
+  const drawnOf = (lines: readonly CompactLine[], unseen: ReadonlySet<string | null>) =>
+    keptOf(lines).flatMap((line, i, kept) => {
+      const drawn = [{ element: elementOf(unseen)(line), rows: line.rows }]
+      if (line.group === null || kept[i + 1]?.group === line.group) return drawn
+      const head = kept.find(one => one.tail !== undefined && one.group === line.group)
+      if (head?.tail === undefined || !hasTail(head, lines)) return drawn
+      const hidden = hiddenOf(head, lines)
+      return [...drawn, { element: head.tail.draw(hidden, hidden > head.tail.gone), rows: 1 }]
+    })
+
+  /**
+   * The finished in two columns of `cell` cells, `height` rows at most,
+   * filled down the first, then down the second, the newest first; a block
+   * whole in one column. An opened one stays in the column it begins in
+   * where it has the rows for its head, one agent and its tail at least,
+   * its agents cut to the rows (the agent in the main view kept); else it
+   * begins atop the second. What has no place counts in the count line,
+   * last; for it the last block gives way, an opened one an agent. Before
+   * an opened block or the agent in the main view has no place, the lines
+   * before it give way, the lowest first. As few rows as hold every line
+   * whole, else `height`.
+   */
+  const columnsIn = (height: number): Placed[][] => {
+    const blocks = blocksOf(ended)
+    const layout = (rows: number, dropped: ReadonlySet<Block>): Placed[][] => {
+      left.clear()
+      const columns: Placed[][] = [[]]
+      let used = 0
+      let isFull = false
+      const leave = (block: Block) => block.forEach(line => left.add(line))
+      for (const block of blocks) {
+        if (isFull || dropped.has(block)) {
+          leave(block)
+          continue
+        }
+        const isOpen = block[0]?.tail !== undefined
+        const whole = block.length + ((block[0]?.tail?.gone ?? 0) > 0 ? 1 : 0)
+        // Atop a column it stays: the second has no more rows.
+        if (!(rows - used >= whole || (isOpen && (rows - used >= 3 || used === 0))) && columns.length < 2) {
+          columns.push([])
+          used = 0
+        }
+        const rest = rows - used
+        const taken = rest >= whole ? whole : isOpen && rest >= 2 ? rest : 0
+        if (taken === 0) {
+          isFull = true
+          leave(block)
+          continue
+        }
+        columns.at(-1)?.push({ block, rows: taken })
+        used += taken
+      }
+      for (let count = endedCount(); count !== null; count = endedCount()) {
+        if (rows - used >= 1) {
+          columns.at(-1)?.push({ block: null, rows: 1 })
+          break
+        }
+        if (columns.length < 2) {
+          columns.push([])
+          used = 0
+          continue
+        }
+        const last = columns.at(-1)?.pop()
+        if (last === undefined || last.block === null) break
+        if (last.block[0]?.tail !== undefined && last.rows > 2) {
+          columns.at(-1)?.push({ ...last, rows: last.rows - 1 })
+          used -= 1
+          continue
+        }
+        leave(last.block)
+        used -= last.rows
+      }
+      // An opened block's agents past its rows: its first ones drawn, the agent in the main view among them.
+      for (const placed of columns.flat()) {
+        if (placed.block === null) continue
+        const [head, ...members] = placed.block
+        if (head === undefined || placed.rows >= placed.block.length + ((head.tail?.gone ?? 0) > 0 ? 1 : 0)) continue
+        const room = Math.max(0, placed.rows - 2)
+        const viewed = members.find(line => line.isViewed)
+        const first = members.slice(0, room)
+        const shown = viewed === undefined || room === 0 || first.includes(viewed) ? first : [...members.slice(0, room - 1), viewed]
+        members.filter(line => !shown.includes(line)).forEach(line => left.add(line))
+      }
+      return columns
+    }
+    for (let rows = 1; rows < height; rows += 1) {
+      const columns = layout(rows, new Set())
+      if (left.size === 0) return columns
+    }
+    const isGuarded = (block: Block) => block[0]?.tail !== undefined || block.some(line => line.isViewed)
+    let dropped = new Set<Block>()
+    for (;;) {
+      const columns = layout(height, dropped)
+      const guarded = blocks.find(block => isGuarded(block) && !dropped.has(block) && block[0] !== undefined && left.has(block[0]))
+      const before = guarded === undefined ? [] : blocks.slice(0, blocks.indexOf(guarded)).filter(block => !isGuarded(block) && !dropped.has(block))
+      const lowest = before.at(-1)
+      if (lowest === undefined) return columns
+      dropped = new Set([...dropped, lowest])
+    }
+  }
+
+  if (cell !== null && room - liveRows() >= 1) {
+    const columns = columnsIn(room - liveRows())
+    const unseen = unseenOf()
+    const count = endedCount()
+    const cellsOfPlaced = (placed: Placed): RenderElement[] => {
+      if (placed.block === null) return count === null ? [] : [countElement(count)]
+      const [head, ...members] = placed.block
+      if (head === undefined) return []
+      const hidden = head.tail === undefined ? 0 : hiddenOf(head, ended)
+      return [
+        elementOf(unseen)(head),
+        ...keptOf(members).map(elementOf(unseen)),
+        ...(head.tail === undefined || hidden === 0 ? [] : [head.tail.draw(hidden, hidden > head.tail.gone)]),
+      ]
+    }
+    const [first = [], second = []] = columns.map(column => column.flatMap(cellsOfPlaced))
+    const blank = <Text>{' '.repeat(cell)}</Text>
+    const pairs = Array.from({ length: Math.max(first.length, second.length) }, (_, row) => (
+      <Box flexDirection="row">
+        <Box width={cell}>{first[row] ?? blank}</Box>
+        {second.length === 0 ? null : <Text dimColor>{' │ '}</Text>}
+        {second.length === 0 ? null : <Box width={cell}>{second[row] ?? null}</Box>}
+      </Box>
+    ))
+    return [...drawnOf(live, unseen).map(line => line.element), ...pairs]
+  }
+
   const lowestFirst = (lines: readonly CompactLine[], keep: (line: CompactLine) => boolean) => lines.filter(keep).reverse()
   const isMember = (line: CompactLine) => line.kind === 'member' && !line.isViewed
   const leave = (line: CompactLine) => () => void left.add(line)
+  // A tail gives way once its head's agents have: the head's count says them, and no agent stands over no tail.
+  const untail = (line: CompactLine) => () => void untailed.add(line)
   // Where a run is among the finished, the older line stands for the heads that give way; else, as before, the count goes first.
   const hasRuns = view.older.runs > 0 || ended.some(line => line.isRun)
   const steps = [
@@ -2287,6 +2467,7 @@ function cutLines(
     ...lowestFirst(ended, line => line.kind === 'agent' && !line.isViewed).map(leave),
     ...lowestFirst(ended, line => isMember(line) && line.at === 0).map(leave),
     ...lowestFirst(ended, line => line.kind !== 'head' && line.isViewed).map(leave),
+    ...lowestFirst(ended, line => line.tail !== undefined).map(untail),
     ...(hasRuns ? [] : [() => void (isCounted.ended = false)]),
     ...lowestFirst(ended, line => line.kind === 'head' && !line.isOpen).map(leave),
     ...lowestFirst(ended, line => line.kind === 'head' && line.isOpen).map(leave),
@@ -2294,6 +2475,7 @@ function cutLines(
       .sort((a, b) => b.at - a.at)
       .map(leave),
     ...lowestFirst(live, line => !line.isRunning && line.kind === 'member' && line.isViewed).map(leave),
+    ...lowestFirst(live, line => line.tail !== undefined).map(untail),
     ...lowestFirst(live, line => !line.isRunning && line.kind === 'agent').map(leave),
     () => void (isCounted.ended = false),
     ...lowestFirst(live, line => line.isRunning && !line.isViewed).map(leave),
@@ -2305,43 +2487,23 @@ function cutLines(
     if (rows() <= room) break
     step()
   }
-  const unseen = new Set([...live, ...ended].filter(line => line.isViewed && left.has(line)).map(line => line.group))
-  const elementOf = (line: CompactLine) => (line.marked !== undefined && unseen.has(line.group) ? line.marked : line.element)
+  // A run's agent left out where its tail took the row that freed comes back, the first first.
+  for (const lines of [live, ended]) {
+    for (const line of lines) {
+      if (!left.has(line) || !isTailed(line, lines) || lines.some(head => untailed.has(head) && head.group === line.group)) continue
+      const before = rows()
+      left.delete(line)
+      if (rows() > before) left.add(line)
+    }
+  }
+  const unseen = unseenOf()
   const hidden = liveHidden()
   const liveDrawn = [
-    ...keptOf(live).map(line => ({ element: elementOf(line), rows: line.rows })),
+    ...drawnOf(live, unseen),
     ...(isCounted.live && hidden > 0 ? [{ element: <Text dimColor>{`${s.agents.more(hidden)} ◉`}</Text>, rows: 1 }] : []),
   ]
   const count = endedCount()
-  const countLine =
-    count === null
-      ? []
-      : [
-          count.isOlder ? (
-            <Text dimColor wrap="truncate-end">
-              {cutCells(count.text, cell ?? width)}
-            </Text>
-          ) : (
-            <Text dimColor>{count.text}</Text>
-          ),
-        ]
-  const cells = [...keptOf(ended).map(elementOf), ...countLine]
-  const endedDrawn =
-    cell === null
-      ? cells.map(element => ({ element, rows: 1 }))
-      : cells
-          .filter((_, i) => i % 2 === 0)
-          .map((first, i) => {
-            const second = cells[i * 2 + 1]
-            const element = (
-              <Box flexDirection="row">
-                <Box width={cell}>{first}</Box>
-                {second === undefined ? null : <Text dimColor>{' │ '}</Text>}
-                {second === undefined ? null : <Box width={cell}>{second}</Box>}
-              </Box>
-            )
-            return { element, rows: 1 }
-          })
+  const endedDrawn = [...drawnOf(ended, unseen), ...(count === null ? [] : [{ element: countElement(count), rows: 1 }])]
   // In a pane with no row even for the counts, the lines that fit.
   const shown: RenderElement[] = []
   let used = 0
@@ -2361,9 +2523,11 @@ function cutLines(
  * 1,1M → Read model.ts`, its call under it where the line has no room for
  * it), a running group's `◉ ▾ verify ×5 0:40 · 2,1M` over its agents, a
  * running run's `◉ review-changes ×7 2:14 · 3,4M` over its running agents
- * and its finished ones' line. What does not fit is counted in a line, the
- * running and the finished apart. From about 100 columns the finished stand
- * in two columns.
+ * and its finished ones' line; an opened run's agents in the order its
+ * script started them, a tail under them counting those not drawn. What does
+ * not fit is counted in a line, the running and the finished apart. From
+ * about 100 columns the finished stand in two columns, filled one after the
+ * other, their figures right-aligned.
  */
 export function agentsCompact(ui: Ui, board: AgentBoard, room: number, controls: AgentsControls): RenderElement {
   const { Box, Text, theme, s } = ui
@@ -2371,7 +2535,9 @@ export function agentsCompact(ui: Ui, board: AgentBoard, room: number, controls:
   const { now } = board
   const view = agentsViewOf(board)
   const cell = width >= TWO_COLUMNS_MIN ? Math.floor((width - 3) / 2) : null
+  const isCell = cell !== null
   const endedWidth = cell ?? width
+  const endedRuns = view.runs.filter(one => !one.isLive)
 
   const head =
     view.agents.length === 0 ? (
@@ -2386,31 +2552,65 @@ export function agentsCompact(ui: Ui, board: AgentBoard, room: number, controls:
       </Text>
     )
 
+  /** What an agent processed and how long it ran. */
+  const agentFigures = (one: ShownAgent) => ({ processed: processedText(ui, one.work), time: elapsedText(one.row, now) })
+  // In two columns each finished line's figures stand right-aligned, each in a column as wide as its widest (version 1.1).
+  const figures = isCell
+    ? [
+        ...endedRuns.flatMap(one => [runFigures(ui, one.whole), ...one.ended.map(agentFigures)]),
+        ...view.groups.flatMap(group => [...(group.prefix === null ? [] : [groupFigures(ui, group.members, now)]), ...group.members.map(agentFigures)]),
+      ]
+    : []
+  const figureCols: Columns = {
+    bar: 0,
+    processed: Math.max(0, ...figures.map(one => one.processed.length)),
+    time: Math.max(0, ...figures.map(one => one.time.length)),
+  }
+
+  /**
+   * A head's parts in one column: its words, then the first of `rests` (its
+   * count and figures, longest first) the row has room for with a few cells
+   * of the words; the words cut to the room left, never the count or what
+   * was processed.
+   */
+  const restParts =
+    (words: string, rests: readonly string[], color: Color, lineWidth: number) =>
+    (lead: readonly Part[]): Part[] => {
+      // A rest is kept where a few cells of the words fit beside it, else the next.
+      const least = Math.min(cellsOf(words), 4)
+      const rest = rests.find(one => widthOf(lead) + least + cellsOf(one) <= lineWidth) ?? rests.at(-1) ?? ''
+      const shown = cutCells(words, Math.max(1, lineWidth - widthOf(lead) - cellsOf(rest)))
+      return [...lead, { text: `${shown}${rest}`, color }]
+    }
+  /** A finished line's parts in one of two columns: its words cut to the room beside what follows them (a count), its figures right-aligned. */
+  const cellParts =
+    (words: string, after: string, color: Color, shown: { processed: string; time: string }) =>
+    (lead: readonly Part[]): Part[] =>
+      workParts(
+        lead,
+        room => [{ text: `${cutCells(words, Math.max(1, room - cellsOf(after)))}${after}`, color }],
+        [],
+        0,
+        endedFigures(figureCols, shown.processed, shown.time),
+        endedWidth,
+      )
+
   /**
    * A group's or a finished run's head, pressed to open or close it: its
-   * glyph and fold mark, its words, then the first of `rests` (its count
-   * and figures, longest first) the row has room for with a few cells of
-   * the words; the words cut to the room left, never the count or what was
-   * processed. Marked while closed holding the agent in the main view.
+   * glyph and fold mark, then what `partsOf` lays out after them. Marked
+   * while closed holding the agent in the main view.
    */
   const groupHead = (
-    words: string,
     members: readonly ShownAgent[],
     fold: string,
     status: string,
-    rests: readonly string[],
-    color: Color,
+    partsOf: (lead: readonly Part[]) => Part[],
     lineWidth: number,
     counted: Pick<CompactLine, 'agents' | 'isRun' | 'tokens'>,
   ): CompactLine => {
     const isOpen = isGroupOpen(controls.folds, fold, 'compact')
-    const lead = foldLead(ui, status, isOpen)
-    // A rest is kept where a few cells of the words fit beside it, else the next.
-    const least = Math.min(cellsOf(words), 4)
-    const rest = rests.find(one => widthOf(lead) + least + cellsOf(one) <= lineWidth) ?? rests.at(-1) ?? ''
-    const shown = cutCells(words, Math.max(1, lineWidth - widthOf(lead) - cellsOf(rest)))
-    const drawn = (isMarked: boolean) =>
-      pressRow(ui, groupKey(fold), [...lead, { text: `${shown}${rest}`, color }], lineWidth, isMarked, () => controls.onFold(fold, 'compact'))
+    const parts = partsOf(foldLead(ui, status, isOpen))
+    const drawn = (isMarked: boolean) => pressRow(ui, groupKey(fold), parts, lineWidth, isMarked, () => controls.onFold(fold, 'compact'))
     const isHolding = holdsViewed(members, controls)
     return {
       element: drawn(!isOpen && isHolding),
@@ -2445,43 +2645,32 @@ export function agentsCompact(ui: Ui, board: AgentBoard, room: number, controls:
     const element = more.length === 0 && first !== undefined ? first : <Box flexDirection="column">{[first, ...more]}</Box>
     return lineOf(element, one, group, at, { rows: 1 + more.length, isRunning: true })
   }
-  // `✓ ▸ prüfen ×4 4,6M`, its agents under it once opened; `✓ review diff 1,2M` for an agent without a group.
-  const agentLine = (one: ShownAgent, lead: readonly Part[], name: string, lineWidth: number) => {
+  // `✓ ▸ prüfen ×4 4,6M`, its agents under it once opened; `✓ review diff 1,2M` for an agent without a group;
+  // in one of two columns `✓ review diff   1,2M  0:48`, the figures right-aligned.
+  const agentLine = (one: ShownAgent, lead: readonly Part[], name: string, lineWidth: number, isInCell = false) => {
     const color = isBroken(one.status) ? theme.accent : 'text'
+    const isMarked = controls.viewed === one.row.id
+    if (isInCell) return pressRow(ui, one.row.id, cellParts(name, '', color, agentFigures(one))(lead), lineWidth, isMarked, pressOf(one.row, controls))
     // The name cut to the room beside what it processed, never the figure.
     const processed = processedText(ui, one.work)
     const shown = cutCells(name, Math.max(0, lineWidth - widthOf(lead) - 1 - cellsOf(processed)))
     const parts: Part[] = [...lead, { text: `${shown}${shown === '' ? '' : ' '}${processed}`, color }]
-    return pressRow(ui, one.row.id, parts, lineWidth, controls.viewed === one.row.id, pressOf(one.row, controls))
+    return pressRow(ui, one.row.id, parts, lineWidth, isMarked, pressOf(one.row, controls))
   }
   /** An agent's lead under its head: the indent, and a failed or stopped one's glyph in the accent. */
   const memberLead = (one: ShownAgent, indent: number): Part[] =>
     isBroken(one.status) ? [gap(indent), { text: `${GLYPH[one.status]} `, color: theme.accent }] : [gap(indent)]
-  /** Under an opened run, how many of its agents are no longer in the list: a line that gives way before its agents. */
-  const goneLine = (count: number, indent: number, lineWidth: number, group: string, at: number): CompactLine[] =>
-    count <= 0
-      ? []
-      : [
-          {
-            element: (
-              <Text dimColor wrap="truncate-end">
-                {cutCells(`${' '.repeat(indent)}${s.agents.runGone(count)}`, lineWidth)}
-              </Text>
-            ),
-            rows: 1,
-            kind: 'member',
-            isRunning: false,
-            agents: 0,
-            isRun: false,
-            tokens: 0,
-            isOpen: false,
-            group,
-            at,
-            isViewed: false,
-          },
-        ]
+  /** The tail under an opened run's agents, `indent` cells in: `+38 weitere`, or `+5 nicht mehr in der Liste` where the rows left none out. */
+  const tailOf = (gone: number, indent: number, lineWidth: number): Tail => ({
+    gone,
+    draw: (count, isCut) => (
+      <Text dimColor wrap="truncate-end">
+        {cutCells(`${' '.repeat(indent)}${isCut ? s.agents.runMore(count) : s.agents.runGone(count)}`, lineWidth)}
+      </Text>
+    ),
+  })
 
-  /** A running run's finished agents in a line (`✓ ▸ 4 fertig 1,0M`), closed until opened: their lines then, and how many left the list. */
+  /** A running run's finished agents in a line (`✓ ▸ 4 fertig 1,0M`), closed until opened: their lines then, and the tail under them. */
   const doneLines = (one: RunView): CompactLine[] => {
     const finished = one.agents - one.live.length
     if (finished <= 0) return []
@@ -2496,6 +2685,7 @@ export function agentsCompact(ui: Ui, board: AgentBoard, room: number, controls:
     const line: CompactLine = {
       element: drawn(!isOpen && isHolding),
       ...(isOpen && isHolding ? { marked: drawn(true) } : {}),
+      ...(isOpen ? { tail: tailOf(finished - one.ended.length, 6, width) } : {}),
       rows: 1,
       kind: 'agent',
       isRunning: false,
@@ -2509,7 +2699,7 @@ export function agentsCompact(ui: Ui, board: AgentBoard, room: number, controls:
     }
     if (!isOpen) return [line]
     const members = one.ended.map((agent, at) => lineOf(agentLine(agent, memberLead(agent, 6), agent.row.description ?? '', width), agent, fold, at, { agents: 0 }))
-    return [line, ...members, ...goneLine(finished - one.ended.length, 6, width, fold, one.ended.length)]
+    return [line, ...members]
   }
 
   /** A running run: its head (no fold: its running agents always show), each running agent by its whole name, its finished ones' line. */
@@ -2553,51 +2743,62 @@ export function agentsCompact(ui: Ui, board: AgentBoard, room: number, controls:
     const isOpen = isGroupOpen(controls.folds, fold, 'compact')
     // Where the row has no room for its time, what its agents processed alone.
     const count = ` ×${group.members.length}`
-    const headLine = groupHead(prefix, group.members, fold, liveStatus(group.members), [`${count} ${figures.time} · ${figures.processed}`, `${count} ${figures.processed}`], 'text', width, {
-      agents: isOpen ? 0 : group.members.length,
-      isRun: false,
-      tokens: 0,
-    })
+    const headLine = groupHead(
+      group.members,
+      fold,
+      liveStatus(group.members),
+      restParts(prefix, [`${count} ${figures.time} · ${figures.processed}`, `${count} ${figures.processed}`], 'text', width),
+      width,
+      { agents: isOpen ? 0 : group.members.length, isRun: false, tokens: 0 },
+    )
     if (!isOpen) return [headLine]
     return [headLine, ...group.members.map((one, at) => runningLine(one, prefixOf(one.row.description ?? '')?.rest ?? '', true, fold, at))]
   })
 
-  // `✓ ▸ review-changes ×9 6:12 · 14M` for a finished run, its agents under it once opened.
-  const endedLines = entriesOf(
-    view.runs.filter(one => !one.isLive),
-    view.groups,
-  ).flatMap((entry): CompactLine[] => {
+  // `✓ ▸ review-changes ×9 6:12 · 14M` for a finished run, its agents under it once opened, in the order its script started them.
+  const endedLines = entriesOf(endedRuns, view.groups).flatMap((entry): CompactLine[] => {
     if (entry.run !== null) {
       const one = entry.run
       const fold = runFold(one.run)
       const figures = runFigures(ui, one.whole)
       const count = ` ×${one.agents}${brokenNote(one)}`
       const color = isBroken(one.status) ? theme.accent : 'text'
-      const rests = [`${count} ${figures.time} · ${figures.processed}`, `${count} ${figures.processed}`]
-      const headLine = groupHead(runName(ui, one.run), one.ended, fold, one.status, rests, color, endedWidth, { agents: 0, isRun: true, tokens: one.whole.tokens })
-      if (!isGroupOpen(controls.folds, fold, 'compact')) return [headLine]
+      const words = runName(ui, one.run)
+      const partsOf = isCell
+        ? cellParts(words, count, color, figures)
+        : restParts(words, [`${count} ${figures.time} · ${figures.processed}`, `${count} ${figures.processed}`], color, endedWidth)
+      const headLine = groupHead(one.ended, fold, one.status, partsOf, endedWidth, { agents: 0, isRun: true, tokens: one.whole.tokens })
+      if (!headLine.isOpen) return [headLine]
       const members = one.ended.map((agent, at) =>
-        lineOf(agentLine(agent, memberLead(agent, 4), agent.row.description ?? '', endedWidth), agent, fold, at, { agents: 0 }),
+        lineOf(agentLine(agent, memberLead(agent, 4), agent.row.description ?? '', endedWidth, isCell), agent, fold, at, { agents: 0 }),
       )
-      return [headLine, ...members, ...goneLine(one.agents - one.ended.length, 4, endedWidth, fold, one.ended.length)]
+      return [{ ...headLine, tail: tailOf(one.agents - one.ended.length, 4, endedWidth) }, ...members]
     }
     const { group } = entry
     const prefix = group.prefix
     if (prefix === null) {
       return group.members.map(one =>
-        lineOf(agentLine(one, [glyphPart(ui, one.status), gap(1)], one.row.description ?? '', endedWidth), one, null, 0, { tokens: tokensOf([one]) }),
+        lineOf(agentLine(one, [glyphPart(ui, one.status), gap(1)], one.row.description ?? '', endedWidth, isCell), one, null, 0, { tokens: tokensOf([one]) }),
       )
     }
     const status = groupStatus(group.members)
+    const color = isBroken(status) ? theme.accent : 'text'
     const isOpen = isGroupOpen(controls.folds, prefix, 'compact')
-    const headLine = groupHead(prefix, group.members, prefix, status, [` ×${group.members.length} ${groupProcessed(ui, group.members)}`], isBroken(status) ? theme.accent : 'text', endedWidth, {
+    const count = ` ×${group.members.length}`
+    const partsOf = isCell
+      ? cellParts(prefix, count, color, groupFigures(ui, group.members, now))
+      : restParts(prefix, [`${count} ${groupProcessed(ui, group.members)}`], color, endedWidth)
+    const headLine = groupHead(group.members, prefix, status, partsOf, endedWidth, {
       agents: isOpen ? 0 : group.members.length,
       isRun: false,
       tokens: tokensOf(group.members),
     })
     if (!isOpen) return [headLine]
-    const members = group.members.map((one, at) => lineOf(agentLine(one, memberLead(one, 4), prefixOf(one.row.description ?? '')?.rest ?? '', endedWidth), one, prefix, at))
-    return [headLine, ...members]
+    const members = group.members.map((one, at) =>
+      lineOf(agentLine(one, memberLead(one, 4), prefixOf(one.row.description ?? '')?.rest ?? '', endedWidth, isCell), one, prefix, at),
+    )
+    // In two columns an opened group's agents that the rows do not hold are counted under them too.
+    return [isCell ? { ...headLine, tail: tailOf(0, 4, endedWidth) } : headLine, ...members]
   })
 
   // The head always; then the running agents and the finished in the rows left.
