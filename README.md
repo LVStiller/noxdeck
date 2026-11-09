@@ -27,7 +27,7 @@ A Claude Code mod: a retro terminal dashboard in a pane beside the transcript, w
   - **CONTEXT**: how full the context window is, by source (messages, MCP, tools, memory, skills, system), a history, growth per turn, cache hit rate and how much is left until auto-compaction.
   - **RADAR**: the same call failing again and again, failures since load, the files read or edited most (hotspots) and how long approval dialogs waited on you. While the session has a todo tool, **PLAN** shows Claude's todo list in its place.
 - **Changes**: the files changed in this session, with lines added and removed, each by its path from the project folder. Cache and build files a Bash command makes on the side (in `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `node_modules`, `.venv` or `.git`, `*.pyc`, `*.pyo`, `.DS_Store`) are counted below the list, not listed; an Edit or Write there is always listed.
-- **Agents**: what the main chat, the subagents and other loops processed since load, each subagent's model, tokens and current activity, in groups that fold, and a timeline. A press on an agent's row shows its transcript in the main view.
+- **Agents**: what the main chat, the subagents and other loops processed since load, each subagent's model, tokens and current activity, in groups that fold, and a timeline. A workflow's agents stand under their run, a line per run with its name, agents, tokens and time; running agents always show one by one with what they do; older runs that no longer fit are summed in one line. An opened run lists its agents in the order its script started them and counts those that find no row (`+38 more`); where the pane is short and about 100 columns wide, the finished runs stand in two columns, filled one after the other, an opened run whole in one. The head counts every agent since load. A press on an agent's row shows its transcript in the main view.
 
 Nox is a pixel picture where the terminal draws pictures (Ghostty, kitty; iTerm2 3.5 and later in fullscreen rendering; tmux with `allow-passthrough` and `focus-events` on) and block characters everywhere else. It reads, writes, runs the shell, thinks, waves when a subagent starts, waits for you, is glad when the turn is done, startles at a failure, warns of a loop, sweats when the context fills up, gets tired when the limit STATUS shows runs low (under 20 % left), and yawns and sleeps after two minutes without a turn. Where the pane is short, a mini owl takes its place.
 
@@ -73,7 +73,7 @@ In `/config`, each under `noxdeck.<name>`, or when installing in a shell with `-
 
 ## What this mod can do
 
-`claude plugin validate .` reads the hooks module the way Claude Code loads it and prints every event it hooks and every call it makes on `$`. For noxdeck 1.0.9:
+`claude plugin validate .` reads the hooks module the way Claude Code loads it and prints every event it hooks and every call it makes on `$`. For noxdeck 1.1.0:
 
 ```
 hooks: session.start, command.run{command=noxdeck}, ui.close{id=noxdeck}, tool.call, agent.spawn, tool.check, classic.PreToolUse, classic.PermissionRequest, classic.PermissionDenied, classic.PostToolUseFailure, classic.PostToolUse, turn.step, turn.start, turn.complete, session.measure, session.compact, session.end, ui.render{component=Pane, requestId=noxdeck}, ui.render{component=SessionMode}
@@ -91,8 +91,8 @@ No network, no file writes, no prompt logging: noxdeck makes no network requests
 | `session.start` | The session starting: it reads the Reduce motion setting, the project folder, the context window and the agent list, registers `/noxdeck` and opens its pane (in an interactive session, unless you closed it). | Nothing: the event passes on unchanged. |
 | `command.run{command=noxdeck}` | Only `/noxdeck`; no other command reaches it. | Answers `/noxdeck` itself: opens the pane (on the tab named) and replies with one line. |
 | `ui.close{id=noxdeck}` | Its own pane closing. | Nothing; it remembers that you closed it, so the pane does not open by itself again. |
-| `tool.call` | Every tool call and its result: the tool, a file's name, the lines a change added and removed, whether it failed, Claude's todo list. | Nothing: the call and its result pass unchanged. |
-| `agent.spawn` | A subagent starting: its description, its type, whether a workflow started it (its prompt only as a hash and a length, to tell its first turn by). | Nothing: `return next(e)`, the answer unread. |
+| `tool.call` | Every tool call and its result: the tool, a file's name, the lines a change added and removed, whether it failed, Claude's todo list, a workflow run's name and id. | Nothing: the call and its result pass unchanged. |
+| `agent.spawn` | A subagent starting: its description, its type, whether a workflow started it and which run (its prompt only as a hash and a length, to tell its first turn by). | Nothing: `return next(e)`, the answer unread. |
 | `tool.check` | That a call reached the permission check. | Nothing: `return next(e)`, the verdict unread. |
 | `classic.PreToolUse` | That a call reached the PreToolUse hooks. | Nothing: `return next(e)`. |
 | `classic.PermissionRequest` | A permission dialog opening: Nox shows a ? until the call ends. | Nothing: `return next(e)`, the answer unread. |

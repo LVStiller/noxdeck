@@ -4,14 +4,17 @@ import type {
   AgentFolds,
   AgentLedger,
   AgentRow,
+  AgentRun,
   AgentWork,
   ContextSample,
   ContextSnapshot,
   ExactFill,
   FileChange,
   HiddenFiles,
+  EndCounts,
   PlanStep,
   RateWindow,
+  RunPast,
   StepStatus,
   TokenTally,
 } from '../types'
@@ -736,7 +739,23 @@ export const NO_TALLY: TokenTally = {
   effort: null,
 }
 
-export const NO_LEDGER: AgentLedger = { since: 0, main: NO_TALLY, work: [], agentsPast: NO_TALLY, otherPast: NO_TALLY }
+/** No agent left the list: none ended so far, by any way. */
+export const NO_ENDS: EndCounts = { completed: 0, failed: 0, killed: 0, ended: 0 }
+
+/** A run none of whose agents left the list yet. */
+const NO_PAST: RunPast = { tally: NO_TALLY, isWhole: true, from: null, to: null, ended: NO_ENDS }
+
+export const NO_LEDGER: AgentLedger = {
+  since: 0,
+  main: NO_TALLY,
+  work: [],
+  agentsPast: NO_TALLY,
+  otherPast: NO_TALLY,
+  runs: [],
+  runsOlder: { runs: 0, agents: 0 },
+  gone: NO_ENDS,
+  goneLoose: 0,
+}
 
 /** One model request added to a tally: its tokens where it reported usage, its model, the effort it asked for. */
 export function withStep(tally: TokenTally, usage: TurnUsage | null, effort: string | null): TokenTally {
@@ -788,12 +807,14 @@ const newWork = (id: string): AgentWork => ({
   lastCall: null,
   startedAt: null,
   endedAt: null,
+  run: null,
 })
 
 /**
  * The ledger within its bounds: the last `MAX_AGENTS` subagents (ended ones
  * leave first) and the last `MAX_OTHER_LOOPS` other loops; the tokens of
- * those that leave are summed into their pot's past, so no pot loses any.
+ * those that leave are summed into their pot's past, so no pot loses any,
+ * and a workflow run's agent's into its run's too, with its start and end.
  */
 function bounded(ledger: AgentLedger): AgentLedger {
   const agents = ledger.work.filter(one => one.isAgent)
@@ -807,7 +828,29 @@ function bounded(ledger: AgentLedger): AgentLedger {
     work: ledger.work.filter(one => keptAgents.has(one) || keptOthers.has(one)),
     agentsPast: left.filter(one => one.isAgent).reduce((sum, one) => plusTally(sum, one.tally), ledger.agentsPast),
     otherPast: left.filter(one => !one.isAgent).reduce((sum, one) => plusTally(sum, one.tally), ledger.otherPast),
+    runs: left.reduce((runs, one) => (one.isAgent && one.run !== null ? withRunPast(runs, one) : runs), ledger.runs),
   }
+}
+
+export const earliest = (a: number | null, b: number | null) => (a === null ? b : b === null ? a : Math.min(a, b))
+export const latest = (a: number | null, b: number | null) => (a === null ? b : b === null ? a : Math.max(a, b))
+
+/** The runs with one of a run's agents' work that left the list added to its run's past: its tokens, its start and its end. */
+function withRunPast(runs: AgentRun[], work: AgentWork): AgentRun[] {
+  return runs.map(run => {
+    if (run.id !== work.run) return run
+    const { past } = run
+    return {
+      ...run,
+      past: {
+        ...past,
+        tally: plusTally(past.tally, work.tally),
+        isWhole: past.isWhole && work.isWhole,
+        from: earliest(past.from, work.startedAt),
+        to: latest(past.to, work.endedAt),
+      },
+    }
+  })
 }
 
 /** One loop's work changed, added when new; the ledger kept within its bounds. */
@@ -818,9 +861,69 @@ export function withWork(ledger: AgentLedger, id: string, change: (work: AgentWo
   return bounded({ ...ledger, work })
 }
 
-/** A loop a spawn answered or the list named: a subagent, its tokens the Agents pot's. */
-export const withAgent = (ledger: AgentLedger, id: string): AgentLedger =>
-  withWork(ledger, id, work => (work.isAgent ? work : { ...work, isAgent: true }))
+/** A workflow run's spawn that named its agent: the run's id, and when. */
+export type RunStart = { id: string; at: number }
+
+/**
+ * A loop a spawn answered or the list named: a subagent, its tokens the
+ * Agents pot's. With `run`, a workflow run's agent: the run counts it once
+ * and is added when new.
+ */
+export function withAgent(ledger: AgentLedger, id: string, run: RunStart | null = null): AgentLedger {
+  const isNewInRun = run !== null && (ledger.work.find(one => one.id === id)?.run ?? null) === null
+  const marked = withWork(ledger, id, work =>
+    work.isAgent && (run === null || work.run !== null) ? work : { ...work, isAgent: true, run: work.run ?? run?.id ?? null },
+  )
+  return run === null || !isNewInRun ? marked : withRun(marked, run.id, run.at, one => ({ ...one, agents: one.agents + 1 }))
+}
+
+/** The most workflow runs the ledger keeps a line of: past it the oldest leaves, counted with its agents in `runsOlder`. */
+export const MAX_RUNS = 30
+
+/** One run changed, added at `at` when new; the runs kept within MAX_RUNS. */
+function withRun(ledger: AgentLedger, id: string, at: number, change: (run: AgentRun) => AgentRun): AgentLedger {
+  if (ledger.runs.some(run => run.id === id)) return { ...ledger, runs: ledger.runs.map(run => (run.id === id ? change(run) : run)) }
+  const runs = [...ledger.runs, change({ id, name: null, firstSeen: at, agents: 0, past: NO_PAST })]
+  const left = runs.slice(0, Math.max(0, runs.length - MAX_RUNS))
+  if (left.length === 0) return { ...ledger, runs }
+  return {
+    ...ledger,
+    runs: runs.slice(left.length),
+    runsOlder: { runs: ledger.runsOlder.runs + left.length, agents: left.reduce((sum, run) => sum + run.agents, ledger.runsOlder.agents) },
+  }
+}
+
+/** A run's name as the Workflow tool's result gave it (`workflowName`, the script's `meta.name`); the run added when it is new. */
+export const withRunName = (ledger: AgentLedger, id: string, name: string, at: number): AgentLedger =>
+  withRun(ledger, id, at, run => (run.name === name ? run : { ...run, name }))
+
+/** How an agent ended as its row last said: done, failed, stopped, else ended with no more known (one that left while running too). */
+export function endOf(row: AgentRow): keyof EndCounts {
+  const status = agentStatus(row)
+  return status === 'completed' || status === 'failed' || status === 'killed' ? status : 'ended'
+}
+
+const plusEnd = (counts: EndCounts, end: keyof EndCounts): EndCounts => ({ ...counts, [end]: counts[end] + 1 })
+
+/** All the agents a count holds, however they ended. */
+export const endsTotal = (counts: EndCounts): number => counts.completed + counts.failed + counts.killed + counts.ended
+
+/**
+ * Agents whose rows left the list of 50: counted by how they ended, for the
+ * tab's head, and in their run's line where the run is kept; one of no run
+ * as loose (one of a run no longer kept is in `runsOlder` already).
+ */
+export function withGone(ledger: AgentLedger, rows: readonly AgentRow[]): AgentLedger {
+  return rows.reduce((sum, row) => {
+    const end = endOf(row)
+    return {
+      ...sum,
+      gone: plusEnd(sum.gone, end),
+      goneLoose: sum.goneLoose + (row.run === null ? 1 : 0),
+      runs: sum.runs.map(run => (run.id === row.run ? { ...run, past: { ...run.past, ended: plusEnd(run.past.ended, end) } } : run)),
+    }
+  }, ledger)
+}
 
 /** An agent's tokens where noxdeck saw all of them, from its start; else null (–). */
 export const wholeTally = (work: AgentWork | null): TokenTally | null => (work?.isWhole === true ? work.tally : null)
@@ -890,15 +993,28 @@ export function groupsOf<T>(items: readonly T[], description: (item: T) => strin
 /** The Agents tab's two views, which fold their groups apart: the full card and the compact view. */
 export type FoldView = 'large' | 'compact'
 
-/** No group folded: the full card's all open, the compact view's all closed. */
+/** Nothing turned: every group and run as the views first show it. */
 export const NO_FOLDS: AgentFolds = { closed: [], opened: [] }
+
+/** The fold keys besides a finished group's prefix: a running group's, a workflow run's line, a running run's finished agents. A prefix holds no `:`, so none is taken for another. */
+export const LIVE_FOLD = 'live:'
+export const RUN_FOLD = 'run:'
+export const DONE_FOLD = 'done:'
 
 /** The most groups a view keeps folded against its default; the oldest fold goes first. */
 const MAX_FOLDS = 50
 
-/** Whether a group shows its agents in a view: open in the full card, closed in the compact view, unless the person turned it. */
-export const isGroupOpen = (folds: AgentFolds, prefix: string, view: FoldView): boolean =>
-  view === 'large' ? !folds.closed.includes(prefix) : folds.opened.includes(prefix)
+/**
+ * How a key first shows in a view: a running group open in both, so its
+ * running agents show one by one; a run's line and a running run's finished
+ * agents closed in both; a finished group open in the full card alone.
+ */
+const isOpenAtFirst = (key: string, view: FoldView): boolean =>
+  key.startsWith(RUN_FOLD) || key.startsWith(DONE_FOLD) ? false : key.startsWith(LIVE_FOLD) || view === 'large'
+
+/** Whether a group or a run's line shows its agents in a view: as it first shows there, unless the person turned it. */
+export const isGroupOpen = (folds: AgentFolds, key: string, view: FoldView): boolean =>
+  isOpenAtFirst(key, view) !== (view === 'large' ? folds.closed : folds.opened).includes(key)
 
 /** The folds with one group turned in one view, the other view's left as they were. */
 export function withFold(folds: AgentFolds, prefix: string, view: FoldView): AgentFolds {

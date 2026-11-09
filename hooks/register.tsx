@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { Args, EngineInterface, Frozen, Register, SiteView, Timer } from 'claude-code'
+import type { Args, BuiltinToolResults, EngineInterface, Frozen, Register, SiteView, Timer } from 'claude-code'
 
 import type { Activity, AgentBoard, AgentRow, Ask, Cues, FinePose, NoxCostume, Tab, TodoTools, UsageTrack } from '../types'
 import {
@@ -39,8 +39,10 @@ import {
   withAgent,
   withChange,
   withFold,
+  withGone,
   withHidden,
   withLedgerStep,
+  withRunName,
   withWork,
 } from './model'
 import type { FoldView, ObservedChange } from './model'
@@ -138,8 +140,10 @@ const CUES_SHAPE = { shape: 'noxdeck/4' } as const
 const RADAR_SHAPE = { shape: 'noxdeck/5' } as const
 /** The usage track's shape since it keeps no peak (version 0.13). */
 const USAGE_SHAPE = { shape: 'noxdeck/7' } as const
-/** The loops' tokens and work by agentId, and the Agents tab's snapshot of them (version 0.14.1; 0.14.0 kept noxdeck/8). */
-const LEDGER_SHAPE = { shape: 'noxdeck/9' } as const
+/** The loops' tokens and work by agentId, the workflow runs and the agents that left the list, and the Agents tab's snapshot of them, its rows with their place in their run (version 1.1; 0.14.1 kept noxdeck/9). */
+const LEDGER_SHAPE = { shape: 'noxdeck/11' } as const
+/** The agents' rows since each names its workflow run and its place in it (version 1.1; earlier ones kept the shared noxdeck/3). */
+const AGENTS_SHAPE = { shape: 'noxdeck/11' } as const
 
 const tab = atom({ plugin: 'noxdeck', key: 'tab' } as const, 'live', SHAPE)
 const plan = atom({ plugin: 'noxdeck', key: 'plan' } as const, [], SHAPE)
@@ -150,7 +154,7 @@ const activity = atom({ plugin: 'noxdeck', key: 'activity' } as const, IDLE, SHA
 const changes = atom({ plugin: 'noxdeck', key: 'changes' } as const, [], SHAPE)
 const missedFiles = atom({ plugin: 'noxdeck', key: 'missedFiles' } as const, 0, SHAPE)
 const hiddenFiles = atom({ plugin: 'noxdeck', key: 'hiddenFiles' } as const, NO_HIDDEN, SHAPE)
-const agents = atom({ plugin: 'noxdeck', key: 'agents' } as const, [], SHAPE)
+const agents = atom({ plugin: 'noxdeck', key: 'agents' } as const, [], AGENTS_SHAPE)
 const root = atom({ plugin: 'noxdeck', key: 'root' } as const, '', SHAPE)
 const now = atom({ plugin: 'noxdeck', key: 'now' } as const, 0, SHAPE)
 const isDismissed = atom({ plugin: 'noxdeck', key: 'isDismissed' } as const, false, SHAPE)
@@ -162,6 +166,7 @@ const todoTools = atom({ plugin: 'noxdeck', key: 'todoTools' } as const, NO_TODO
 const agentLedger = atom({ plugin: 'noxdeck', key: 'agentLedger' } as const, NO_LEDGER, LEDGER_SHAPE)
 const agentBoard = atom({ plugin: 'noxdeck', key: 'agentBoard' } as const, NO_BOARD, LEDGER_SHAPE)
 const agentFolds = atom({ plugin: 'noxdeck', key: 'agentFolds' } as const, NO_FOLDS, SHAPE)
+const agentsLeft = atom({ plugin: 'noxdeck', key: 'agentsLeft' } as const, [], SHAPE)
 const isProcessedOpen = atom({ plugin: 'noxdeck', key: 'isProcessedOpen' } as const, false, SHAPE)
 const images = atom({ plugin: 'noxdeck', key: 'images' } as const, null, SHAPE)
 const drawnCostume = atom({ plugin: 'noxdeck', key: 'costume' } as const, null, SHAPE)
@@ -237,12 +242,14 @@ async function refreshAgents($: EngineInterface): Promise<void> {
   // waiting list: spawned since load, it is seen from its start, its tokens
   // the Agents pot's.
   const named = new Set((await read($, agents)).filter(row => row.description !== null).map(row => row.id))
+  // An agent that left the list of 50 the agent list still names (an idle teammate) is not added again.
+  const left = new Set(await read($, agentsLeft))
   const spawned = listed.filter(info => {
     const name = maskSecrets(info.description)
     return !named.has(info.id) && takeSpawn(at, waiting => waiting.find(one => one.description === name)) !== undefined
   })
   if (spawned.length > 0) await update($, agentLedger, ledger => spawned.reduce((sum, info) => withAgent(sum, info.id), ledger))
-  await update($, agents, rows => {
+  await updateAgents($, rows => {
     const next = rows.map(row => {
       const info = listed.find(one => one.id === row.id)
       if (info) {
@@ -263,10 +270,10 @@ async function refreshAgents($: EngineInterface): Promise<void> {
       return row
     })
     for (const info of listed) {
-      if (next.some(row => row.id === info.id)) continue
+      if (left.has(info.id) || next.some(row => row.id === info.id)) continue
       next.push(newAgent(info.id, at, { description: maskSecrets(info.description), type: info.type, listedStatus: info.status }))
     }
-    return lastAgents(next, isAgentLive)
+    return next
   })
 }
 
@@ -282,14 +289,54 @@ function newAgent(id: string, at: number, fields: Partial<AgentRow> = {}): Agent
     isTimed: false,
     isGone: false,
     firstSeen: at,
+    run: null,
+    index: null,
     ...fields,
   }
 }
 
+/** The most ids of agents that left the list noxdeck keeps, so the agent list cannot bring one back. */
+const MAX_LEFT = 1000
+
+/**
+ * Writes the agents' rows, the last 50 of them (`isKept`'s rows stay first,
+ * the running ones). A named one that leaves the list, one added by this
+ * change too, is counted in the ledger by how it ended (and in its run's
+ * line), so the tab still counts every agent since load; its id is kept,
+ * so it is counted once.
+ */
+async function updateAgents($: EngineInterface, change: (rows: AgentRow[]) => AgentRow[], isKept: (row: AgentRow) => boolean = isAgentLive): Promise<void> {
+  let left: AgentRow[] = []
+  await update($, agents, rows => {
+    const next = change(rows)
+    const kept = lastAgents(next, isKept)
+    const ids = new Set(kept.map(row => row.id))
+    left = next.filter(row => row.description !== null && !ids.has(row.id))
+    return kept
+  })
+  if (left.length > 0) {
+    const known = new Set(await read($, agentsLeft))
+    const gone = left.filter(row => !known.has(row.id))
+    await update($, agentsLeft, ids => [...ids, ...gone.map(row => row.id)].slice(-MAX_LEFT))
+    if (gone.length > 0) await update($, agentLedger, ledger => withGone(ledger, gone))
+  }
+}
+
+/** The name the Workflow tool's result gives its run (`workflowName`, the script's `meta.name`), kept by the run's id. */
+async function noteWorkflow($: EngineInterface, result: unknown, at: number): Promise<void> {
+  const record = result as Partial<BuiltinToolResults['Workflow']>
+  const id = record.runId
+  const name = record.workflowName?.trim()
+  if (typeof id !== 'string' || id === '' || typeof name !== 'string' || name === '') return
+  await update($, agentLedger, ledger => withRunName(ledger, id, maskSecrets(name), at))
+}
+
+/** The rows with one agent's changed, added when new; updateAgents keeps the last 50, that one among them. */
 const upsertAgent = (rows: AgentRow[], id: string, at: number, change: (row: AgentRow) => AgentRow): AgentRow[] =>
-  rows.some(row => row.id === id)
-    ? rows.map(row => (row.id === id ? change(row) : row))
-    : lastAgents([...rows, change(newAgent(id, at))], row => row.id === id || isAgentLive(row))
+  rows.some(row => row.id === id) ? rows.map(row => (row.id === id ? change(row) : row)) : [...rows, change(newAgent(id, at))]
+
+/** Kept first when the rows are bounded: the agent a turn just started or ended, and the running ones. */
+const keepingOf = (id: string) => (row: AgentRow) => row.id === id || isAgentLive(row)
 
 /** The Agents tab's snapshot as last written: a write only when it changed, or while an agent's clock runs. */
 let boardKey = ''
@@ -396,8 +443,18 @@ const agentsAsking = new Set<string>()
 /** How long a spawn waits for its loop's first turn; one refused or run elsewhere starts none here. */
 const SPAWN_WAIT_MS = 30_000
 
-/** A spawn waiting to be named: its prompt only as a hash and a length, white space out, to tell its loop's first turn by. */
-type PendingSpawn = { promptKey: string; promptLength: number; isWorkflow: boolean; description: string; type: string; at: number }
+/** A spawn waiting to be named: its prompt only as a hash and a length, white space out, to tell its loop's first turn by; a workflow's with its run. */
+type PendingSpawn = {
+  promptKey: string
+  promptLength: number
+  isWorkflow: boolean
+  run: string | null
+  /** Its place among its run's `agent()` calls; null for any other spawn. */
+  index: number | null
+  description: string
+  type: string
+  at: number
+}
 
 // agent.spawn passes its answer on unread, so a new agent's id comes from
 // elsewhere: the agent list names a subagent of the Agent tool; one it never
@@ -683,6 +740,9 @@ function noteSpawn($: EngineInterface, spawned: Frozen<Args<'agent.spawn'>>): Pr
       promptKey: hashOf(prompt),
       promptLength: prompt.length,
       isWorkflow: spawned.workflow !== undefined,
+      // The run's id is empty only outside a real run.
+      run: spawned.workflow === undefined || spawned.workflow.runId === '' ? null : spawned.workflow.runId,
+      index: spawned.workflow?.agentIndex ?? null,
       description: maskSecrets(spawned.description),
       type: spawned.subagentType,
       at,
@@ -962,6 +1022,8 @@ export const register: Register = (on, options) => {
 
       // A worktree entered or left moves the project folder.
       if (e.tool === 'EnterWorktree' || e.tool === 'ExitWorktree') await refreshRoot($)
+      // A workflow started or resumed: its run's name, for the run's line on the Agents tab.
+      if (e.tool === 'Workflow') await noteWorkflow($, result, at)
 
       if (e.tool === 'TodoWrite' && e.agentId === undefined) {
         const record = result as Record<string, unknown>
@@ -1071,16 +1133,22 @@ export const register: Register = (on, options) => {
           await refreshAgents($)
           if (!(await isNamed())) spawn = takeSpawn(at, waiting => spawnOfTurn(waiting, e.text))
         }
-        await update($, agents, rows =>
-          upsertAgent(rows, id, at, row => ({
-            ...row,
-            ...(spawn === undefined ? {} : { description: spawn.description, type: spawn.type }),
-            turnStartedAt: at,
-            isTimed: true,
-            endReason: null,
-          })),
+        await updateAgents(
+          $,
+          rows =>
+            upsertAgent(rows, id, at, row => ({
+              ...row,
+              ...(spawn === undefined ? {} : { description: spawn.description, type: spawn.type, run: spawn.run, index: spawn.index }),
+              turnStartedAt: at,
+              isTimed: true,
+              endReason: null,
+            })),
+          keepingOf(id),
         )
-        if (spawn !== undefined) await update($, agentLedger, ledger => withAgent(ledger, id))
+        if (spawn !== undefined) {
+          const run = spawn.run === null ? null : { id: spawn.run, at }
+          await update($, agentLedger, ledger => withAgent(ledger, id, run))
+        }
         // Its first turn's start, for the group's duration and the timeline.
         await update($, agentLedger, ledger => withWork(ledger, id, work => ({ ...work, startedAt: work.startedAt ?? at })))
       }
@@ -1133,14 +1201,17 @@ export const register: Register = (on, options) => {
       }
       const id = e.agentId
       const at = await $.clock.now()
-      await update($, agents, rows =>
-        upsertAgent(rows, id, at, row => ({
-          ...row,
-          turnStartedAt: null,
-          doneMs: row.doneMs + e.durationMs,
-          isTimed: true,
-          endReason: e.reason,
-        })),
+      await updateAgents(
+        $,
+        rows =>
+          upsertAgent(rows, id, at, row => ({
+            ...row,
+            turnStartedAt: null,
+            doneMs: row.doneMs + e.durationMs,
+            isTimed: true,
+            endReason: e.reason,
+          })),
+        keepingOf(id),
       )
       await update($, agentLedger, ledger => withWork(ledger, id, work => ({ ...work, endedAt: at })))
       // Its turn's dialogs are over; an agent at work keeps the rest from starting.
@@ -1198,6 +1269,7 @@ export const register: Register = (on, options) => {
         await update($, agentLedger, () => ({ ...NO_LEDGER, since: at }))
         await update($, agentBoard, () => ({ ...NO_BOARD, now: at, ledger: { ...NO_LEDGER, since: at } }))
         await update($, agentFolds, () => NO_FOLDS)
+        await update($, agentsLeft, () => [])
         boardKey = ''
         checkedAsks = []
         checkedCalls.clear()

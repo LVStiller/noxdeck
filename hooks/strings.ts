@@ -170,6 +170,16 @@ export type Strings = {
     timelineShort: string
     /** Agents left out where a line has no room, counted. */
     more: (count: number) => string
+    /** A workflow run's name where the Workflow tool's result named none noxdeck heard: by its id. */
+    runUnnamed: (id: string) => string
+    /** A running run's finished agents, in one line under its running ones. */
+    runDone: (count: number) => string
+    /** Under an opened run: its agents no longer in the list of 50, counted. */
+    runGone: (count: number) => string
+    /** Under an opened run whose agents the rows do not all hold: those not drawn, the ones no longer in the list included, counted. */
+    runMore: (count: number) => string
+    /** The last line of the finished: the older runs and agents without a run that have no line, and what they processed. */
+    older: (runs: number, agents: number, processed: string) => string
     note: string
     /** The Button back to the main chat while an agent's transcript is in the main view, with that agent's name. */
     back: (name: string) => string
@@ -347,6 +357,15 @@ const de: Strings = {
     timeline: 'Zeitleiste seit Laden',
     timelineShort: 'Zeitleiste',
     more: count => `+${count}`,
+    runUnnamed: id => `Workflow ${id}`,
+    runDone: count => `${count} fertig`,
+    runGone: count => `+${count} nicht mehr in der Liste`,
+    runMore: count => `+${count} weitere`,
+    older: (runs, agents, processed) => {
+      const runsPart = `${runs} ${runs === 1 ? 'älterer Lauf' : 'ältere Läufe'}`
+      const agentsPart = `${agents} ${runs > 0 ? '' : agents === 1 ? 'älterer ' : 'ältere '}${agents === 1 ? 'Agent' : 'Agents'}`
+      return `+${runs > 0 && agents > 0 ? `${runsPart} und ${agentsPart}` : runs > 0 ? runsPart : agentsPart} · ${processed}`
+    },
     note: 'Verarbeitet = Summe aller Schritte, inkl. Wiederholung aus dem Cache',
     back: name => `◀ Haupt-Chat · du siehst gerade ${name}`,
     backNote: 'Enter im Prompt geht jetzt an diesen Agent',
@@ -502,6 +521,15 @@ const en: Strings = {
     timeline: 'Timeline since load',
     timelineShort: 'Timeline',
     more: count => `+${count}`,
+    runUnnamed: id => `Workflow ${id}`,
+    runDone: count => `${count} done`,
+    runGone: count => `+${count} no longer in the list`,
+    runMore: count => `+${count} more`,
+    older: (runs, agents, processed) => {
+      const runsPart = `${runs} older ${runs === 1 ? 'run' : 'runs'}`
+      const agentsPart = `${agents} ${runs > 0 ? '' : 'older '}${agents === 1 ? 'agent' : 'agents'}`
+      return `+${runs > 0 && agents > 0 ? `${runsPart} and ${agentsPart}` : runs > 0 ? runsPart : agentsPart} · ${processed}`
+    },
     note: 'Processed = sum over all steps, cache re-reads included',
     back: name => `◀ Main chat · you are viewing ${name}`,
     backNote: 'Enter in the prompt now goes to this agent',

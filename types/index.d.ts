@@ -317,6 +317,10 @@ export type AgentRow = {
   /** Listed once, then dropped by $.agent.list(): its loop has ended. */
   isGone: boolean
   firstSeen: number
+  /** The workflow run its spawn named (`workflow.runId`, version 1.1); null for any other agent. */
+  run: string | null
+  /** Its place among its run's `agent()` calls (`workflow.agentIndex`, from 1): the order its run's line lists it in; null for any other agent. */
+  index: number | null
 }
 
 /**
@@ -367,6 +371,41 @@ export type AgentWork = {
   /** When its first turn started and its last turn ended, as noxdeck heard them. */
   startedAt: number | null
   endedAt: number | null
+  /** The workflow run its spawn named, as its row has it; null for any other loop. */
+  run: string | null
+}
+
+/** How agents that left the list ended: done, failed, stopped, or ended with no more known. */
+export type EndCounts = { completed: number; failed: number; killed: number; ended: number }
+
+/**
+ * What a run's agents that left the list of 50 add to its line: their
+ * tokens, from the first start to the last end among them, how they ended.
+ * The tokens and times leave with their work, the endings with their rows.
+ */
+export type RunPast = {
+  tally: TokenTally
+  /** Whether noxdeck saw every one of them from its start. */
+  isWhole: boolean
+  from: number | null
+  to: number | null
+  ended: EndCounts
+}
+
+/**
+ * A workflow run (version 1.1): one line on the Agents tab, kept whole
+ * however many of its agents left the list of 50.
+ */
+export type AgentRun = {
+  /** Its agents' `workflow.runId` (`wf_…`); a resumed run keeps it. */
+  id: string
+  /** The script's `meta.name`, from the Workflow tool's result; null until noxdeck heard it. */
+  name: string | null
+  /** When noxdeck first heard of it: its name or its first agent. */
+  firstSeen: number
+  /** Agents a spawn of this run named since load. */
+  agents: number
+  past: RunPast
 }
 
 /**
@@ -385,6 +424,14 @@ export type AgentLedger = {
   agentsPast: TokenTally
   /** Other loops' tokens that left `work` past its 20: kept as a sum in Sonstiges only. */
   otherPast: TokenTally
+  /** The last 30 workflow runs, oldest first (version 1.1). */
+  runs: AgentRun[]
+  /** Runs that left `runs` past its 30: how many, and how many agents they named. */
+  runsOlder: { runs: number; agents: number }
+  /** Agents that left the list of 50, by how they ended: the tab's head counts every agent since load. */
+  gone: EndCounts
+  /** How many of them belonged to no workflow run. */
+  goneLoose: number
 }
 
 /** What the Agents tab draws, written at most once a second: the clock, the agents and their work. */
@@ -392,14 +439,17 @@ export type AgentBoard = { now: number; rows: AgentRow[]; ledger: AgentLedger }
 
 /**
  * The groups the person folded on the Agents tab, by their prefix (`prüfen`
- * of `prüfen: model.ts`; a running group's as `live:prüfen`, the full card
- * alone): the full card's and the compact view's apart, each the groups
- * turned from that view's default.
+ * of `prüfen: model.ts`; a running group's as `live:prüfen`), a workflow
+ * run's line by `run:<runId>` and a running run's finished agents by
+ * `done:<runId>` (version 1.1): the full card's and the compact view's
+ * apart, each the keys turned from how that view first shows them. A
+ * finished group shows open in the full card and closed in the compact
+ * view, a running group open in both, a run's lines closed in both.
  */
 export type AgentFolds = {
-  /** The full card shows its groups open; these the person closed. */
+  /** The full card's keys the person turned (a finished or running group closed, a run's line opened). */
   closed: string[]
-  /** The compact view shows its groups closed; these the person opened. */
+  /** The compact view's keys the person turned (a finished group or a run's line opened, a running group closed). */
   opened: string[]
 }
 
@@ -438,6 +488,12 @@ declare module 'claude-code' {
       agentBoard: Shaped<AgentBoard>
       /** Written when the person presses a group's head on the Agents tab (version 0.15). */
       agentFolds: Shaped<AgentFolds>
+      /**
+       * The ids of the agents that left the list of 50, the last 1000
+       * (version 1.1): the agent list may still name one (an idle teammate),
+       * which is then neither added again nor counted twice.
+       */
+      agentsLeft: Shaped<string[]>
       /**
        * Whether the Agents tab's head `Verarbeitet seit Laden` is open, the
        * table of the pots in its place; written when the person presses it
