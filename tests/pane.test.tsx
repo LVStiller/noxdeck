@@ -243,6 +243,21 @@ describe('context', () => {
     await ui.unmount()
   })
 
+  test('the stats lines stand right under the growth line, the table of mcp, memory and skills after them', async ($, on) => {
+    engine(on)
+    await start($)
+    for (const surface of SURFACES) {
+      const ui = await $.ui.mount({ ...PANE, surface })
+      const texts = (await ui.findAll({ type: 'Text' })).map(found => found.text)
+      await ui.unmount()
+      // The table's rows by what they name: the legend has an mcp and a memory of its own.
+      const lines = [/^Ø /, /^Cache Hit /, /^\d+× kompaktiert/, /^mcp +\d+ Server/, /^memory +CLAUDE\.md/, /^skills +\d+ gelistet/]
+      const order = lines.map(line => texts.findIndex(text => line.test(text)))
+      expect(order.every(index => index >= 0)).toBe(true)
+      expect(order).toEqual([...order].sort((a, b) => a - b))
+    }
+  })
+
   test('a compaction window set with /autocompact: mark, line, forecast and what is left follow the engine\'s threshold', async ($, on) => {
     // A 1M model whose session compacts at 667k (/autocompact 700k): turns at 480k, 520k and 670k.
     engine(on, {
