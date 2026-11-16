@@ -117,6 +117,8 @@ export type World = {
   tools?: string[]
   /** The session's project root: /proj by default */
   root?: string
+  /** The session's model, as `$.session.model()` names it: claude-opus-5-5 by default */
+  model?: string
   /**
    * How the terminal answers a blit: `ok` draws pictures (Ghostty, kitty);
    * `alt` draws the alt instead (the default: a terminal without pictures);
@@ -163,6 +165,7 @@ export function engine(on: On, world: World = {}) {
   on('agent.list', () => ({ value: world.agents ?? [] }))
   on('tool.list', () => ({ value: (world.tools ?? []).map(name => ({ name, description: '', mcp: name.startsWith('mcp__') })) }))
   on('session.root', () => ({ value: world.root ?? '/proj' }))
+  on('session.model', () => ({ value: world.model ?? 'claude-opus-5-5' }))
   on('session.usage', () => {
     const series = world.messages ?? [76 * K]
     const messages = series[Math.min(measured, series.length - 1)] ?? 76 * K

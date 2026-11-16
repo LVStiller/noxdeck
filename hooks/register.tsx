@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { Args, BuiltinToolResults, EngineInterface, Frozen, Register, SiteView, Timer } from 'claude-code'
+import type { Args, BuiltinToolResults, EngineInterface, Frozen, Register, SessionContextUsage, SiteView, Timer } from 'claude-code'
 
 import type { Activity, AgentBoard, AgentRow, Ask, Cues, FinePose, NoxCostume, Tab, TodoTools, UsageTrack } from '../types'
 import {
@@ -21,6 +21,7 @@ import {
   bashChangesOf,
   callFileOf,
   changeOf,
+  compactionSign,
   effortText,
   exactOf,
   hiddenCount,
@@ -217,6 +218,24 @@ async function refreshContext($: EngineInterface, isTurn: boolean): Promise<void
     ...track,
     history: [...track.history, { tokens: exact.tokens, window: exact.window }].slice(-240),
   }))
+}
+
+/**
+ * Counts a compaction by what it does to the window, as a measurement shows
+ * it: the fill gone, or fallen far (`compactionSign`). The `session.compact`
+ * event itself does not reach a person's plugin where an organization's
+ * plugin sits above it, the measurements do. The measurements of one
+ * compaction count once: the fill gone first, the lower fill after it is
+ * compared with none. Another model's first measurement starts over and
+ * counts nothing. `$.session.model()` only reads.
+ */
+async function countCompaction($: EngineInterface, measured: SessionContextUsage): Promise<void> {
+  const model = await $.session.model().catch(() => null)
+  const snapshot = await read($, context)
+  const isSameModel = model === null || seenFill.model === null || model === seenFill.model
+  const sign = isSameModel ? compactionSign(seenFill.tokens, measured.tokens, snapshot?.threshold ?? measured.window) : null
+  seenFill = { tokens: measured.tokens ?? null, model: model ?? seenFill.model }
+  if (sign !== null) await update($, usage, track => ({ ...track, compactions: track.compactions + 1 }))
 }
 
 /**
@@ -439,6 +458,16 @@ const ranCalls = new Set<string>()
 const ranMs = new Map<string, number>()
 /** Subagents with a dialog open: only their calls need to look for one to end. */
 const agentsAsking = new Set<string>()
+
+/** A measurement's fill, and the model it was of: what the next measurement is compared with. */
+type SeenFill = { tokens: number | null; model: string | null }
+const NO_FILL: SeenFill = { tokens: null, model: null }
+/**
+ * The last measurement's fill: null before one, and while the live window has
+ * none (fresh, or just compacted). This module's: a reload drops it, and the
+ * measurement after it counts nothing.
+ */
+let seenFill: SeenFill = NO_FILL
 
 /** How long a spawn waits for its loop's first turn; one refused or run elsewhere starts none here. */
 const SPAWN_WAIT_MS = 30_000
@@ -1234,20 +1263,10 @@ export const register: Register = (on, options) => {
     const measured = await next(e)
     await quietly(async () => {
       if (e.changed.includes('rateLimits')) await update($, limit, () => limitOf(e.rateLimits))
+      await quietly(() => countCompaction($, e.context))
       if (e.changed.includes('context')) await refreshContext($, false)
     })
     return measured
-  })
-
-  on('session.compact', async ($, e, next) => {
-    const compacted = await next(e)
-    await quietly(async () => {
-      if (e.agentId !== undefined || e.trigger === 'precompute' || compacted.skip !== undefined) return
-      await update($, usage, track => ({ ...track, compactions: track.compactions + 1 }))
-      // The compacted transcript is installed once this chain has returned: measure it after.
-      $.clock.after(500, () => void quietly(() => refreshContext($, false)))
-    })
-    return compacted
   })
 
   on('session.end', async ($, e, next) => {
@@ -1279,6 +1298,7 @@ export const register: Register = (on, options) => {
         ranMs.clear()
         agentsAsking.clear()
         pendingSpawns = []
+        seenFill = NO_FILL
         await update($, context, () => null)
         $.clock.after(1000, () => void quietly(() => refreshContext($, false)))
       })

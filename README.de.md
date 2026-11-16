@@ -73,14 +73,14 @@ In `/config`, jeweils unter `noxdeck.<name>`, oder bei der Installation in einer
 
 ## Was dieser Mod kann
 
-`claude plugin validate .` liest das Hooks-Modul so, wie Claude Code es lädt, und nennt jedes Ereignis, in das es sich einhängt, und jeden Aufruf, den es auf `$` macht. Für noxdeck 1.1.0:
+`claude plugin validate .` liest das Hooks-Modul so, wie Claude Code es lädt, und nennt jedes Ereignis, in das es sich einhängt, und jeden Aufruf, den es auf `$` macht. Für noxdeck 1.1.1:
 
 ```
-hooks: session.start, command.run{command=noxdeck}, ui.close{id=noxdeck}, tool.call, agent.spawn, tool.check, classic.PreToolUse, classic.PermissionRequest, classic.PermissionDenied, classic.PostToolUseFailure, classic.PostToolUse, turn.step, turn.start, turn.complete, session.measure, session.compact, session.end, ui.render{component=Pane, requestId=noxdeck}, ui.render{component=SessionMode}
-calls: $.agent.list, $.clock.after, $.clock.every (via ensureTicker), $.clock.now, $.command.register, $.session.root (via refreshRoot), $.session.usage (via refreshContext), $.settings.read (via readMotion), $.state.get, $.state.set, $.tool.list (via refreshTodoTools), $.ui.blit (via blit), $.ui.open (via openPane), $.ui.panes (via isPaneOpen, isPaneShown), $.ui.resolve, $.ui.toast, $.ui.view (via showView)
+hooks: session.start, command.run{command=noxdeck}, ui.close{id=noxdeck}, tool.call, agent.spawn, tool.check, classic.PreToolUse, classic.PermissionRequest, classic.PermissionDenied, classic.PostToolUseFailure, classic.PostToolUse, turn.step, turn.start, turn.complete, session.measure, session.end, ui.render{component=Pane, requestId=noxdeck}, ui.render{component=SessionMode}
+calls: $.agent.list, $.clock.after, $.clock.every (via ensureTicker), $.clock.now, $.command.register, $.session.model (via countCompaction), $.session.root (via refreshRoot), $.session.usage (via refreshContext), $.settings.read (via readMotion), $.state.get, $.state.set, $.tool.list (via refreshTodoTools), $.ui.blit (via blit), $.ui.open (via openPane), $.ui.panes (via isPaneOpen, isPaneShown), $.ui.resolve, $.ui.toast, $.ui.view (via showView)
 ```
 
-Jeder Hook außer dem, der `/noxdeck` beantwortet, und den beiden, die zeichnen, gibt sein Ereignis unverändert weiter und liefert zurück, was Claude Code geantwortet hat (siehe [Hooks im Einzelnen](#hooks-im-einzelnen)). Die Aufrufe lesen (Tools, Kontextverbrauch, den Projektordner, Agents, Panes, die Einstellung Reduce motion), registrieren `/noxdeck`, betreiben seinen Timer, zeichnen sein eigenes Pane und halten seine Zahlen in seinem eigenen `$.state`. Ein Aufruf handelt, und nur, wenn du auf die Zeile eines Agents drückst: `$.ui.view` zeigt das Transkript dieses Agents in der Hauptansicht; eine Ablehnung (oder, bei einem Agent eines Workflows, wo er zu sehen ist) erscheint mit `$.ui.toast`.
+Jeder Hook außer dem, der `/noxdeck` beantwortet, und den beiden, die zeichnen, gibt sein Ereignis unverändert weiter und liefert zurück, was Claude Code geantwortet hat (siehe [Hooks im Einzelnen](#hooks-im-einzelnen)). Die Aufrufe lesen (Tools, Kontextverbrauch, den Namen des Modells, den Projektordner, Agents, Panes, die Einstellung Reduce motion), registrieren `/noxdeck`, betreiben seinen Timer, zeichnen sein eigenes Pane und halten seine Zahlen in seinem eigenen `$.state`. Ein Aufruf handelt, und nur, wenn du auf die Zeile eines Agents drückst: `$.ui.view` zeigt das Transkript dieses Agents in der Hauptansicht; eine Ablehnung (oder, bei einem Agent eines Workflows, wo er zu sehen ist) erscheint mit `$.ui.toast`.
 
 Kein Netzwerk, keine Dateischreibzugriffe, kein Prompt-Logging: noxdeck stellt keine Netzwerkanfragen, schreibt keine Dateien, startet keine Prozesse, ruft kein Modell auf, behält keinen Prompt-Text und liest kein Transkript eines Agents. Geheimnisse in Befehlen, die es zeigt (Tokens, Schlüssel, Passwörter), werden maskiert. Nox' Bilder entstehen im Speicher.
 
@@ -102,8 +102,7 @@ Kein Netzwerk, keine Dateischreibzugriffe, kein Prompt-Logging: noxdeck stellt k
 | `turn.step` | Die Tokens jeder Modellanfrage, sobald ihre Antwort vollständig ist. | Nein: Jeder Chunk und das Ergebnis gehen durch, wie sie kamen; Modell und Effort werden nie umgeschrieben. |
 | `turn.start` | Den Start eines Turns, des Haupt-Chats oder eines Subagents. | Nein: Das Ereignis geht unverändert weiter. |
 | `turn.complete` | Das Ende eines Turns: warum, wie lange, seine Tokens. | Nein: Das Ereignis geht unverändert weiter. |
-| `session.measure` | Änderungen am Kontextverbrauch und an den Nutzungslimits (5 Stunden, Woche). | Nein: Das Ereignis geht unverändert weiter. |
-| `session.compact` | Eine Kompaktierung, um sie zu zählen. | Nein: Das Ereignis geht unverändert weiter. |
+| `session.measure` | Änderungen am Kontextverbrauch und an den Nutzungslimits (5 Stunden, Woche); eine Kompaktierung, erkannt am verschwundenen oder stark gefallenen Füllstand, um sie zu zählen. | Nein: Das Ereignis geht unverändert weiter. |
 | `session.end` | `/clear` oder `/resume`, nach denen das Pane neu beginnt. | Nein: Das Ereignis geht unverändert weiter. |
 | `ui.render{component=Pane, requestId=noxdeck}` | – | Zeichnet noxdecks eigenes Pane. |
 | `ui.render{component=SessionMode}` | – | Ergänzt die Fußzeile um `noxdeck · <Theme>`, hinter dem, was Claude Code dort zeichnet. |

@@ -1,6 +1,7 @@
 import { describe, expect, test as kitTest } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
 import type { AgentInfo, BuiltinToolResults, PluginRegisterInput, SessionRateLimit } from 'claude-code'
-import { bashChangesOf, hiddenCount, isCachePath, NO_HIDDEN, planFromTaskList, planWithTask, projectPath, withHidden } from '../hooks/model'
+import { bashChangesOf, compactionSign, hiddenCount, isCachePath, NO_HIDDEN, planFromTaskList, planWithTask, projectPath, withHidden } from '../hooks/model'
 import { LOCALES, stringsOf } from '../hooks/strings'
 import {
   SURFACES,
@@ -33,6 +34,7 @@ import {
   has,
 } from './helpers'
 import type { World, Found, Size } from './helpers'
+import { GUARD } from './guard'
 import type { PlanStep } from '../types'
 
 const KEPT = [{ role: 'user' as const, text: 'summary', toolUses: [] }]
@@ -184,8 +186,8 @@ describe('plan', () => {
 
 describe('context', () => {
   test('the CONTEXT card: measured header, grouped bar and legend, history, growth, table', async ($, on) => {
-    // usage calls: session.start, the measure, two turn ends (one sample each), the compaction
-    const clock = engine(on, { messages: [76 * K, 76 * K, 62 * K, 76 * K, 30 * K] })
+    // usage calls: session.start, the measure, two turn ends (one sample each), the compaction's measurements
+    engine(on, { messages: [76 * K, 76 * K, 62 * K, 76 * K, 30 * K] })
     on('session.compact', (_, e) => ({ messages: e.messages, tokensBefore: 170 * K, tokensAfter: 40 * K }))
     await start($)
     await $.session.measure({ context: { window: 200 * K, tokens: 116 * K, percent: 58 }, rateLimits: [], changed: ['context'] })
@@ -226,10 +228,13 @@ describe('context', () => {
       await ui.unmount()
     }
 
-    await $.session.compact({ trigger: 'auto', messages: KEPT })
+    // A precompute installs nothing, so no measurement follows it: it counts nothing.
     await $.session.compact({ trigger: 'precompute', messages: KEPT })
-    // Measured once the compaction is installed, after its chain returned; no history column for it.
-    await clock.advance(1000)
+    await $.session.compact({ trigger: 'auto', messages: KEPT })
+    // Invented: the measurements an auto compaction raises (the fill gone, then the
+    // next response's 70k), until a recording replaces them. No history column for it.
+    await $.session.measure({ context: { window: 200 * K }, rateLimits: [], changed: ['context'] })
+    await $.session.measure({ context: { window: 200 * K, tokens: 70 * K, percent: 35 }, rateLimits: [], changed: ['context'] })
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
     // Measured at 70k after compacting: ~97k left.
     expect(await ui.find({ type: 'Text', text: `Cache Hit ${P(90)} · noch ~97k bis Compact` })).toBeDefined()
@@ -310,6 +315,121 @@ describe('context', () => {
       expect(await ui.find({ type: 'Text', text: '✎ noch keine Änderungen' })).toBeDefined()
       await ui.unmount()
     }
+  })
+})
+
+describe('compactions, counted by what they do to the window', () => {
+  /** How many compactions the CONTEXT card counts. */
+  const counted = async ($: Engine) => {
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const line = await ui.find({ type: 'Text', text: /^\d+× kompaktiert/ })
+    await ui.unmount()
+    return Number.parseInt(line?.text ?? '', 10)
+  }
+  /** A measurement: the fill a response reported, or none (a fresh window, or one just compacted). */
+  const measure = ($: Engine, tokens?: number) =>
+    $.session.measure({
+      context: tokens === undefined ? { window: 200 * K } : { window: 200 * K, tokens, percent: Math.round(tokens / (2 * K)) },
+      rateLimits: [],
+      changed: ['context'],
+    })
+
+  // Invented, in every test here: which measurements a compaction, a /clear,
+  // a resume, another model and a rewind raise, and in which order. The
+  // fields are the types' (a fill is absent until the live window's first
+  // response); a recording replaces the sequences.
+
+  test('under an organization\'s plugin, which sends the event past noxdeck, a compaction counts', { plugins: [GUARD] }, async ($, on) => {
+    engine(on)
+    const heard: string[] = []
+    on('session.compact', (_, e) => (heard.push(e.trigger), { messages: e.messages }))
+    await start($)
+    await measure($, 116 * K)
+    await $.session.compact({ trigger: 'auto', messages: KEPT })
+    expect(heard).toEqual(['auto'])
+    expect(await counted($)).toBe(0)
+    await measure($)
+    await measure($, 70 * K)
+    expect(await counted($)).toBe(1)
+  })
+
+  test('one compaction counts once: its event, the fill gone and the lower fill after it', async ($, on) => {
+    engine(on)
+    on('session.compact', (_, e) => ({ messages: e.messages }))
+    await start($)
+    await measure($, 116 * K)
+    await $.session.compact({ trigger: 'manual', messages: KEPT })
+    await measure($)
+    // 30k: less than half of 116k and under a quarter of the 167k threshold, a fall by itself.
+    await measure($, 30 * K)
+    expect(await counted($)).toBe(1)
+    await measure($, 44 * K)
+    await measure($, 140 * K)
+    await measure($)
+    await measure($)
+    await measure($, 30 * K)
+    expect(await counted($)).toBe(2)
+  })
+
+  test('a fall with no measurement in between counts; a fresh window and a smaller fall do not', async ($, on) => {
+    engine(on)
+    await start($)
+    // A fresh session: no fill yet, then its first.
+    await measure($)
+    await measure($, 116 * K)
+    expect(await counted($)).toBe(0)
+    await measure($, 30 * K)
+    expect(await counted($)).toBe(1)
+    // Old tool results cleared, say: 150k to 90k.
+    await measure($, 150 * K)
+    await measure($, 90 * K)
+    expect(await counted($)).toBe(1)
+  })
+
+  test('a fall: by more than half, to under a quarter of the threshold', () => {
+    const threshold = 167 * K
+    expect(compactionSign(116 * K, undefined, threshold)).toBe('absent')
+    expect(compactionSign(116 * K, 30 * K, threshold)).toBe('drop')
+    // Under a quarter of the threshold (41.75k) or not.
+    expect(compactionSign(116 * K, 41 * K, threshold)).toBe('drop')
+    expect(compactionSign(116 * K, 42 * K, threshold)).toBeNull()
+    // More than half or not.
+    expect(compactionSign(60 * K, 29 * K, threshold)).toBe('drop')
+    expect(compactionSign(60 * K, 30 * K, threshold)).toBeNull()
+    expect(compactionSign(116 * K, 120 * K, threshold)).toBeNull()
+    // Nothing to compare with: before the first measurement, and after a fill that was gone.
+    expect(compactionSign(null, undefined, threshold)).toBeNull()
+    expect(compactionSign(null, 30 * K, threshold)).toBeNull()
+  })
+
+  test('a /clear, a resume, another model and a rewind count nothing', async ($, on) => {
+    const world: World = {}
+    engine(on, world)
+    on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+    await start($)
+    for (const reason of ['clear', 'resume'] as const) {
+      await measure($, 116 * K)
+      await $.session.end({ reason, sessionId: 's1', resume: { id: 's1' } })
+      // The conversation that took its place has no fill yet.
+      await measure($)
+      await measure($, 20 * K)
+      expect(await counted($)).toBe(0)
+    }
+
+    await measure($, 116 * K)
+    world.model = 'claude-haiku-5-5'
+    await measure($)
+    await measure($, 20 * K)
+    expect(await counted($)).toBe(0)
+    // On the model it has now, a compaction counts as on the one before.
+    await measure($, 116 * K)
+    await measure($)
+    expect(await counted($)).toBe(1)
+
+    // A rewind by one message: a fill a little lower.
+    await measure($, 116 * K)
+    await measure($, 110 * K)
+    expect(await counted($)).toBe(1)
   })
 })
 
