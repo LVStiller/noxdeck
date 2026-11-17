@@ -226,7 +226,7 @@ async function refreshContext($: EngineInterface, isTurn: boolean): Promise<void
  * one that found one tells it: one compaction once, the looks that find
  * none after it counting nothing more, and none in a window that never had
  * a fill (a fresh session). The `session.compact` event itself does not
- * reach a person's plugin where an organization's plugin sits above it;
+ * reach a person's plugin where Claude Code's built-in guard sits above it;
  * these two events do. The plain `$.session.usage()` is the status line's
  * figures: it only reads, and counts nothing anew.
  */

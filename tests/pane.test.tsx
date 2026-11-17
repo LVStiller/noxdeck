@@ -376,7 +376,7 @@ describe('compactions, counted by the fill a turn or a model request of the main
   // requests' own. The fill is absent in a fresh window and after a
   // compaction, until the next response.
 
-  test('under an organization\'s plugin, which sends session.compact past noxdeck, a compaction counts with the next turn', { plugins: [GUARD] }, async ($, on) => {
+  test('under Claude Code\'s built-in guard, which sends session.compact past noxdeck, a compaction counts with the next turn', { plugins: [GUARD] }, async ($, on) => {
     const world: World = { fill: null }
     engine(on, world)
     const request = session(on, world)

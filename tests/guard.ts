@@ -1,4 +1,4 @@
-// An organization's plugin above noxdeck, as far as the tests need one.
+// Claude Code's built-in guard above noxdeck, as far as the tests need it.
 //
 // Claude Code loads a plugin of its own, `sec-default@builtin`, ahead of
 // every plugin a person installs where the machine has managed settings or
