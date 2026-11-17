@@ -31,6 +31,8 @@ A Claude Code mod: a retro terminal dashboard in a pane beside the transcript, w
 
 Nox is a pixel picture where the terminal draws pictures (Ghostty, kitty; iTerm2 3.5 and later in fullscreen rendering; tmux with `allow-passthrough` and `focus-events` on) and block characters everywhere else. It reads, writes, runs the shell, thinks, waves when a subagent starts, waits for you, is glad when the turn is done, startles at a failure, warns of a loop, sweats when the context fills up, gets tired when the limit STATUS shows runs low (under 20 % left), and yawns and sleeps after two minutes without a turn. Where the pane is short, a mini owl takes its place.
 
+**On Team and Enterprise plans, or where an organization manages Claude Code's settings.** There Claude Code can run a built-in plugin ahead of yours that passes some events on past other plugins. noxdeck 1.1.1 counts compactions there too. Four displays stay empty under it for now and are planned for an upcoming release: "needs your approval" on Nox, the time approval dialogs waited on you, tool failures in RADAR, and the startled owl. On every plan, the compaction count rises with your next prompt after `/compact`, not at once.
+
 ## Installation
 
 This repository is its own plugin marketplace: [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) lists one plugin, `noxdeck`, from the repository root.
@@ -55,7 +57,7 @@ To update: `claude plugin marketplace update noxdeck`, `claude plugin update nox
 
 ## Tested with
 
-Claude Code 2.1.319. The mod API is early access and may change between releases.
+Claude Code 2.1.326. The mod API is early access and may change between releases.
 
 ## Settings
 
@@ -73,11 +75,11 @@ In `/config`, each under `noxdeck.<name>`, or when installing in a shell with `-
 
 ## What this mod can do
 
-`claude plugin validate .` reads the hooks module the way Claude Code loads it and prints every event it hooks and every call it makes on `$`. For noxdeck 1.1.0:
+`claude plugin validate .` reads the hooks module the way Claude Code loads it and prints every event it hooks and every call it makes on `$`. For noxdeck 1.1.1:
 
 ```
-hooks: session.start, command.run{command=noxdeck}, ui.close{id=noxdeck}, tool.call, agent.spawn, tool.check, classic.PreToolUse, classic.PermissionRequest, classic.PermissionDenied, classic.PostToolUseFailure, classic.PostToolUse, turn.step, turn.start, turn.complete, session.measure, session.compact, session.end, ui.render{component=Pane, requestId=noxdeck}, ui.render{component=SessionMode}
-calls: $.agent.list, $.clock.after, $.clock.every (via ensureTicker), $.clock.now, $.command.register, $.session.root (via refreshRoot), $.session.usage (via refreshContext), $.settings.read (via readMotion), $.state.get, $.state.set, $.tool.list (via refreshTodoTools), $.ui.blit (via blit), $.ui.open (via openPane), $.ui.panes (via isPaneOpen, isPaneShown), $.ui.resolve, $.ui.toast, $.ui.view (via showView)
+hooks: session.start, command.run{command=noxdeck}, ui.close{id=noxdeck}, tool.call, agent.spawn, tool.check, classic.PreToolUse, classic.PermissionRequest, classic.PermissionDenied, classic.PostToolUseFailure, classic.PostToolUse, turn.step, turn.start, turn.complete, session.measure, session.end, ui.render{component=Pane, requestId=noxdeck}, ui.render{component=SessionMode}
+calls: $.agent.list, $.clock.after, $.clock.every (via ensureTicker), $.clock.now, $.command.register, $.session.root (via refreshRoot), $.session.usage (via lookForCompaction, refreshContext), $.settings.read (via readMotion), $.state.get, $.state.set, $.tool.list (via refreshTodoTools), $.ui.blit (via blit), $.ui.open (via openPane), $.ui.panes (via isPaneOpen, isPaneShown), $.ui.resolve, $.ui.toast, $.ui.view (via showView)
 ```
 
 Every hook but the one answering `/noxdeck` and the two that draw passes its event on unchanged and returns what Claude Code answered (see [Hooks in detail](#hooks-in-detail)). The calls read (tools, context usage, the project root, agents, panes, the Reduce motion setting), register `/noxdeck`, run its timer, draw its own pane and keep its figures in its own `$.state`. One call acts, and only when you press an agent's row: `$.ui.view` shows that agent's transcript in the main view; a refusal (or, for a workflow's agent, where to see it) is shown with `$.ui.toast`.
@@ -99,11 +101,10 @@ No network, no file writes, no prompt logging: noxdeck makes no network requests
 | `classic.PermissionDenied` | The auto-mode check refusing a call, so RADAR does not count it as a failure. | Nothing: `return next(e)`. |
 | `classic.PostToolUseFailure` | A tool that failed or was interrupted as it ran, and how long it ran. | Nothing: `return next(e)`. |
 | `classic.PostToolUse` | A tool that ran, and how long it ran. | Nothing: `return next(e)`. |
-| `turn.step` | Each model request's tokens, once its response is whole. | Nothing: every chunk and the result pass through as they came; model and effort are never rewritten. |
-| `turn.start` | A turn starting, the main chat's or a subagent's. | Nothing: the event passes on unchanged. |
+| `turn.step` | Each model request's tokens, once its response is whole; as a request of the main chat begins, whether the context window still has a fill, to count a compaction. | Nothing: every chunk and the result pass through as they came; model and effort are never rewritten. |
+| `turn.start` | A turn starting, the main chat's or a subagent's; as the main chat's starts, whether the context window still has a fill, to count a compaction. | Nothing: the event passes on unchanged. |
 | `turn.complete` | A turn ending: why, how long, its tokens. | Nothing: the event passes on unchanged. |
 | `session.measure` | The context usage and the usage limits (5-hour, weekly) changing. | Nothing: the event passes on unchanged. |
-| `session.compact` | A compaction, to count it. | Nothing: the event passes on unchanged. |
 | `session.end` | `/clear` or `/resume`, after which the pane starts over. | Nothing: the event passes on unchanged. |
 | `ui.render{component=Pane, requestId=noxdeck}` | – | Draws noxdeck's own pane. |
 | `ui.render{component=SessionMode}` | – | Adds `noxdeck · <theme>` to the footer, after what Claude Code draws there. |

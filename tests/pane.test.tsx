@@ -1,5 +1,6 @@
 import { describe, expect, test as kitTest } from 'claude-code/testing'
-import type { AgentInfo, BuiltinToolResults, PluginRegisterInput, SessionRateLimit } from 'claude-code'
+import type { Engine } from 'claude-code/testing'
+import type { AgentInfo, BuiltinToolResults, On, PluginRegisterInput, SessionRateLimit, TurnUsage } from 'claude-code'
 import { bashChangesOf, hiddenCount, isCachePath, NO_HIDDEN, planFromTaskList, planWithTask, projectPath, withHidden } from '../hooks/model'
 import { LOCALES, stringsOf } from '../hooks/strings'
 import {
@@ -33,6 +34,7 @@ import {
   has,
 } from './helpers'
 import type { World, Found, Size } from './helpers'
+import { GUARD } from './guard'
 import type { PlanStep } from '../types'
 
 const KEPT = [{ role: 'user' as const, text: 'summary', toolUses: [] }]
@@ -184,8 +186,9 @@ describe('plan', () => {
 
 describe('context', () => {
   test('the CONTEXT card: measured header, grouped bar and legend, history, growth, table', async ($, on) => {
-    // usage calls: session.start, the measure, two turn ends (one sample each), the compaction
-    const clock = engine(on, { messages: [76 * K, 76 * K, 62 * K, 76 * K, 30 * K] })
+    // usage calls with a breakdown: session.start, the measure, two turn ends (one sample each), the measurement after the compaction
+    const world: World = { messages: [76 * K, 76 * K, 62 * K, 76 * K, 30 * K] }
+    engine(on, world)
     on('session.compact', (_, e) => ({ messages: e.messages, tokensBefore: 170 * K, tokensAfter: 40 * K }))
     await start($)
     await $.session.measure({ context: { window: 200 * K, tokens: 116 * K, percent: 58 }, rateLimits: [], changed: ['context'] })
@@ -226,16 +229,38 @@ describe('context', () => {
       await ui.unmount()
     }
 
-    await $.session.compact({ trigger: 'auto', messages: KEPT })
+    // A turn's start finds the window's fill; a compaction takes it, and the next
+    // turn's start finds none and counts one (the order recorded on 17 November
+    // 2026; the figures are this test's). A precompute installs nothing.
+    world.fill = 116 * K
+    await $.turn.start({ text: '', turnId: 't3' })
     await $.session.compact({ trigger: 'precompute', messages: KEPT })
-    // Measured once the compaction is installed, after its chain returned; no history column for it.
-    await clock.advance(1000)
+    await $.session.compact({ trigger: 'auto', messages: KEPT })
+    world.fill = null
+    await $.turn.start({ text: '', turnId: 't4' })
+    // The measurement after that turn: its response's 70k. No history column for it.
+    await $.session.measure({ context: { window: 200 * K, tokens: 70 * K, percent: 35 }, rateLimits: [], changed: ['context'] })
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
     // Measured at 70k after compacting: ~97k left.
     expect(await ui.find({ type: 'Text', text: `Cache Hit ${P(90)} · noch ~97k bis Compact` })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^1× kompaktiert · seit Laden$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: `${P(35)} · 70k / 200k` })).toBeDefined()
     await ui.unmount()
+  })
+
+  test('the stats lines stand right under the growth line, the table of mcp, memory and skills after them', async ($, on) => {
+    engine(on)
+    await start($)
+    for (const surface of SURFACES) {
+      const ui = await $.ui.mount({ ...PANE, surface })
+      const texts = (await ui.findAll({ type: 'Text' })).map(found => found.text)
+      await ui.unmount()
+      // The table's rows by what they name: the legend has an mcp and a memory of its own.
+      const lines = [/^Ø /, /^Cache Hit /, /^\d+× kompaktiert/, /^mcp +\d+ Server/, /^memory +CLAUDE\.md/, /^skills +\d+ gelistet/]
+      const order = lines.map(line => texts.findIndex(text => line.test(text)))
+      expect(order.every(index => index >= 0)).toBe(true)
+      expect(order).toEqual([...order].sort((a, b) => a - b))
+    }
   })
 
   test('a compaction window set with /autocompact: mark, line, forecast and what is left follow the engine\'s threshold', async ($, on) => {
@@ -310,6 +335,191 @@ describe('context', () => {
       expect(await ui.find({ type: 'Text', text: '✎ noch keine Änderungen' })).toBeDefined()
       await ui.unmount()
     }
+  })
+})
+
+describe('compactions, counted by the fill a turn or a model request of the main loop finds gone', () => {
+  /** How many compactions the CONTEXT card counts. */
+  const counted = async ($: Engine) => {
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const line = await ui.find({ type: 'Text', text: /^\d+× kompaktiert/ })
+    await ui.unmount()
+    return Number.parseInt(line?.text ?? '', 10)
+  }
+  const TOKENS: TurnUsage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: 'claude-sonnet-5-5' }
+
+  /**
+   * A session whose model requests the test sends one by one, each read to
+   * its end. A main-loop response leaves the live window the `fill` the
+   * request names; a subagent's leaves it as it is.
+   */
+  function session(on: On, world: World) {
+    let answered: number | undefined
+    on('turn.step', async function* (_, e) {
+      yield { kind: 'text' as const, index: 0, text: 'ok' }
+      if (e.agentId === undefined && answered !== undefined) world.fill = answered
+      return { turnId: e.turnId, index: e.index, answer: 'ok', toolUses: [], stopReason: 'end_turn' as const, usage: TOKENS }
+    })
+    return async ($: Engine, index: number, messageCount: number, fill?: number, more: { model?: string; agentId?: string } = {}) => {
+      answered = fill
+      const stream = $.turn.step({ turnId: 't', index, messageCount, model: 'claude-sonnet-5-5', ...more })
+      let read = await stream.next()
+      while (read.done !== true) read = await stream.next()
+    }
+  }
+  /** A main-loop turn starting. */
+  const turn = ($: Engine, turnId: string) => $.turn.start({ text: '', turnId })
+
+  // The figures in the first three tests are two sessions' of 17 November 2026
+  // (Claude Code 2.1.326), as `$.session.usage()` answered when each turn and
+  // each model request began, and after each response; `messageCount` is the
+  // requests' own. The fill is absent in a fresh window and after a
+  // compaction, until the next response.
+
+  test('under Claude Code\'s built-in guard, which sends session.compact past noxdeck, a compaction counts with the next turn', { plugins: [GUARD] }, async ($, on) => {
+    const world: World = { fill: null }
+    engine(on, world)
+    const request = session(on, world)
+    const heard: string[] = []
+    on('session.compact', (_, e) => (heard.push(e.trigger), { messages: e.messages }))
+    await start($)
+    // The first turn: a fresh window, no fill at the turn's start nor at its one request; the response left 42,692.
+    await turn($, 't1')
+    await request($, 0, 20, 42_692)
+    expect(await counted($)).toBe(0)
+    // /compact: nothing of it reaches noxdeck.
+    await $.session.compact({ trigger: 'manual', messages: KEPT })
+    world.fill = null
+    expect(heard).toEqual(['manual'])
+    expect(await counted($)).toBe(0)
+    // The next turn's start finds the fill gone, its first request too: one compaction.
+    await turn($, 't2')
+    expect(await counted($)).toBe(1)
+    await request($, 0, 24, 45_089)
+    await request($, 1, 32, 46_325)
+    expect(await counted($)).toBe(1)
+  })
+
+  test('a manual compaction between two turns and two automatic ones within a turn count three, each once, with no plugin above', async ($, on) => {
+    const world: World = { fill: null }
+    engine(on, world)
+    const request = session(on, world)
+    const heard: string[] = []
+    on('session.compact', (_, e) => (heard.push(e.trigger), { messages: e.messages }))
+    await start($)
+    await turn($, 't1')
+    await request($, 0, 14, 47_664)
+    expect(await counted($)).toBe(0)
+    // /compact: here the event passes noxdeck, which has no hook on it.
+    await $.session.compact({ trigger: 'manual', messages: KEPT })
+    world.fill = null
+    expect(await counted($)).toBe(0)
+    await turn($, 't2')
+    expect(await counted($)).toBe(1)
+    // The turn reads a file in 300-line parts: [messageCount, the fill its response left].
+    const untilFirst = [[20, 49_611], [23, 63_832], [25, 78_053], [27, 92_274], [29, 107_098], [33, 122_275], [37, 137_538], [39, 152_660], [41, 167_782]] as const
+    const untilSecond = [[19, 80_163], [23, 95_593], [25, 110_715], [28, 125_868], [32, 141_089], [34, 156_211], [36, 171_333]] as const
+    const toTheEnd = [[19, 80_235], [23, 95_665], [25, 110_787], [28, 125_940], [31, 141_136], [33, 141_262]] as const
+    let index = 0
+    for (const [messageCount, fill] of untilFirst) await request($, index++, messageCount, fill)
+    expect(await counted($)).toBe(1)
+    // Past the threshold of 167,000 the engine compacts: the request after it carries 19 messages and finds no fill.
+    await $.session.compact({ trigger: 'auto', messages: KEPT })
+    world.fill = null
+    for (const [messageCount, fill] of untilSecond) await request($, index++, messageCount, fill)
+    expect(await counted($)).toBe(2)
+    await $.session.compact({ trigger: 'auto', messages: KEPT })
+    world.fill = null
+    for (const [messageCount, fill] of toTheEnd) await request($, index++, messageCount, fill)
+    expect(await counted($)).toBe(3)
+    expect(heard).toEqual(['manual', 'auto', 'auto'])
+  })
+
+  test('another model and a rewind by one message count nothing', async ($, on) => {
+    const world: World = { fill: 141_262 }
+    engine(on, world)
+    const request = session(on, world)
+    await start($)
+    // /model haiku, then a turn: the fill stays the last response's.
+    await turn($, 't3')
+    await request($, 0, 44, 142_103, { model: 'claude-haiku-5-5' })
+    // Back on the model before, and a turn.
+    await turn($, 't4')
+    await request($, 0, 53, 142_955)
+    // /rewind to before that turn's message: the fill is the response's before it again, the request carries 53 messages again.
+    world.fill = 142_103
+    await turn($, 't5')
+    await request($, 0, 53, 142_955)
+    expect(await counted($)).toBe(0)
+  })
+
+  test('a subagent\'s turn and requests look at nothing', async ($, on) => {
+    const world: World = { fill: null }
+    engine(on, world)
+    const request = session(on, world)
+    await start($)
+    await turn($, 't1')
+    await request($, 0, 14, 47_664)
+    world.fill = null
+    // Invented: a subagent's turn between a compaction and the main loop's next
+    // turn; no recording has a subagent. `agentId` is the types'.
+    await $.turn.start({ text: '', turnId: 'a1', agentId: 'agent-1' })
+    await request($, 0, 3, undefined, { agentId: 'agent-1' })
+    expect(await counted($)).toBe(0)
+    await turn($, 't2')
+    expect(await counted($)).toBe(1)
+  })
+
+  test('a /clear and a resume start over: the window that took the place counts nothing', async ($, on) => {
+    const world: World = { fill: null }
+    const clock = engine(on, world)
+    const request = session(on, world)
+    on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+    await start($)
+    for (const reason of ['clear', 'resume'] as const) {
+      await turn($, 't1')
+      await request($, 0, 14, 47_664)
+      await $.session.end({ reason, sessionId: 's1', resume: { id: 's1' } })
+      // Invented: the conversation that takes the place has no fill at its first turn.
+      world.fill = null
+      // The pane measures the new window a second after.
+      await clock.advance(1000)
+      await turn($, 't2')
+      await request($, 0, 14, 20_000)
+      expect(await counted($)).toBe(0)
+    }
+  })
+
+  test('a compaction while the session sat idle counts with the next turn', async ($, on) => {
+    const world: World = { fill: null }
+    engine(on, world)
+    const request = session(on, world)
+    await start($)
+    await turn($, 't1')
+    await request($, 0, 14, 47_664)
+    // Invented: an idle compaction leaves the window as a manual one does, and no event of it arrives.
+    world.fill = null
+    await turn($, 't2')
+    await request($, 0, 20, 49_611)
+    expect(await counted($)).toBe(1)
+  })
+
+  test('a rewind to before the window\'s first response is counted as a compaction: no fill tells the two apart', async ($, on) => {
+    const world: World = { fill: null }
+    engine(on, world)
+    const request = session(on, world)
+    await start($)
+    await turn($, 't1')
+    await request($, 0, 14, 47_664)
+    world.fill = null
+    await turn($, 't2')
+    await request($, 0, 20, 49_611)
+    expect(await counted($)).toBe(1)
+    // Invented: a rewind to before the message of `t2` leaves the window without a fill again.
+    world.fill = null
+    await turn($, 't3')
+    await request($, 0, 20, 49_611)
+    expect(await counted($)).toBe(2)
   })
 })
 

@@ -650,7 +650,8 @@ export function contextCard(ui: Ui, context: ContextSnapshot | null, usage: Usag
   const current = contextTokens(context)
   const { perTurn, compactIn } = growthWords(ui, context, usage)
 
-  // The breakdown: a table, label grey, name bright, value right-aligned.
+  // The breakdown, last on the card, under the growth and stats lines: a
+  // table, label grey, name bright, value right-aligned.
   const labelWidth = Math.max(s.rows.mcp.length, s.rows.memory.length, s.rows.skills.length) + 1
   const row = (label: string, name: string, detail: string, value: string) =>
     spread(
@@ -697,7 +698,7 @@ export function contextCard(ui: Ui, context: ContextSnapshot | null, usage: Usag
   const tableRows = 1 + memoryRows.length + (context.memory.length > 3 ? 1 : 0) + 1
   // Growth and stats lines wrap where a part is wider than the card: counted as drawn.
   const lineRows = (lines: readonly string[]) => lines.reduce((sum, line) => sum + wrappedRows(line, width), 0)
-  const rows = 1 + legend.lines.length + 1 + chart.length + lineRows(growthLines) + tableRows + lineRows(stats)
+  const rows = 1 + legend.lines.length + 1 + chart.length + lineRows(growthLines) + lineRows(stats) + tableRows
 
   return card(
     ui,
@@ -724,6 +725,7 @@ export function contextCard(ui: Ui, context: ContextSnapshot | null, usage: Usag
       </Text>
     )),
     ...growthLines.map(line => <Text dimColor>{line}</Text>),
+    ...stats.map(line => <Text dimColor>{line}</Text>),
     mcpRow,
     ...memoryRows,
     more(context.memory.length - 3, s.context.moreFiles),
@@ -735,7 +737,6 @@ export function contextCard(ui: Ui, context: ContextSnapshot | null, usage: Usag
           context.skills.listed < context.skills.total ? s.context.of(context.skills.total) : '',
           estimate(context.skills.tokens),
         ),
-    ...stats.map(line => <Text dimColor>{line}</Text>),
     ],
     rows,
   )
