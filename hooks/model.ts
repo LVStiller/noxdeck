@@ -395,29 +395,6 @@ export function thresholdPercent(context: ContextSnapshot): number {
   return ((context.exact?.tokens ?? context.totalTokens) * 100) / context.threshold
 }
 
-/** How a measurement shows a compaction: the fill gone (`absent`), or fallen far (`drop`). */
-export type CompactionSign = 'absent' | 'drop'
-
-/** A fall tells a compaction past this share of the fill before it … */
-const DROP_SHARE = 0.5
-/** … that ends under this share of the auto-compact threshold (of the window with auto-compaction off). */
-const DROP_FLOOR = 0.25
-
-/**
- * Whether a measurement shows a compaction, by the fill of the one before
- * it (`before`: null without one, and while the window had none).
- *
- * The live window has no fill from a compaction until its next response, so
- * a fill that is gone tells one. Where no measurement fell in between, the
- * fall does: by more than half, to under a quarter of `threshold`. A fall
- * short of either counts nothing.
- */
-export function compactionSign(before: number | null, tokens: number | undefined, threshold: number): CompactionSign | null {
-  if (before === null) return null
-  if (tokens === undefined) return 'absent'
-  return tokens < before * DROP_SHARE && tokens < threshold * DROP_FLOOR ? 'drop' : null
-}
-
 export type Growth = { perTurn: number | null; turnsLeft: number | null }
 
 const GROWTH_WINDOW = 5

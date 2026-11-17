@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { Args, BuiltinToolResults, EngineInterface, Frozen, Register, SessionContextUsage, SiteView, Timer } from 'claude-code'
+import type { Args, BuiltinToolResults, EngineInterface, Frozen, Register, SiteView, Timer } from 'claude-code'
 
 import type { Activity, AgentBoard, AgentRow, Ask, Cues, FinePose, NoxCostume, Tab, TodoTools, UsageTrack } from '../types'
 import {
@@ -21,7 +21,6 @@ import {
   bashChangesOf,
   callFileOf,
   changeOf,
-  compactionSign,
   effortText,
   exactOf,
   hiddenCount,
@@ -221,21 +220,21 @@ async function refreshContext($: EngineInterface, isTurn: boolean): Promise<void
 }
 
 /**
- * Counts a compaction by what it does to the window, as a measurement shows
- * it: the fill gone, or fallen far (`compactionSign`). The `session.compact`
- * event itself does not reach a person's plugin where an organization's
- * plugin sits above it, the measurements do. The measurements of one
- * compaction count once: the fill gone first, the lower fill after it is
- * compared with none. Another model's first measurement starts over and
- * counts nothing. `$.session.model()` only reads.
+ * Looks at the window's fill as a turn or a model request of the main loop
+ * begins, and counts a compaction. A compaction leaves the live window
+ * without a fill until its next response, so a look that finds none after
+ * one that found one tells it: one compaction once, the looks that find
+ * none after it counting nothing more, and none in a window that never had
+ * a fill (a fresh session). The `session.compact` event itself does not
+ * reach a person's plugin where an organization's plugin sits above it;
+ * these two events do. The plain `$.session.usage()` is the status line's
+ * figures: it only reads, and counts nothing anew.
  */
-async function countCompaction($: EngineInterface, measured: SessionContextUsage): Promise<void> {
-  const model = await $.session.model().catch(() => null)
-  const snapshot = await read($, context)
-  const isSameModel = model === null || seenFill.model === null || model === seenFill.model
-  const sign = isSameModel ? compactionSign(seenFill.tokens, measured.tokens, snapshot?.threshold ?? measured.window) : null
-  seenFill = { tokens: measured.tokens ?? null, model: model ?? seenFill.model }
-  if (sign !== null) await update($, usage, track => ({ ...track, compactions: track.compactions + 1 }))
+async function lookForCompaction($: EngineInterface): Promise<void> {
+  const fill = (await $.session.usage()).context.tokens
+  const isCompacted = hadFill && fill === undefined
+  hadFill = fill !== undefined
+  if (isCompacted) await update($, usage, track => ({ ...track, compactions: track.compactions + 1 }))
 }
 
 /**
@@ -459,15 +458,12 @@ const ranMs = new Map<string, number>()
 /** Subagents with a dialog open: only their calls need to look for one to end. */
 const agentsAsking = new Set<string>()
 
-/** A measurement's fill, and the model it was of: what the next measurement is compared with. */
-type SeenFill = { tokens: number | null; model: string | null }
-const NO_FILL: SeenFill = { tokens: null, model: null }
 /**
- * The last measurement's fill: null before one, and while the live window has
- * none (fresh, or just compacted). This module's: a reload drops it, and the
- * measurement after it counts nothing.
+ * Whether the main loop's window had a fill when last looked at, or has one
+ * since by a response of its own. This module's: a reload drops it, and the
+ * look after it counts nothing.
  */
-let seenFill: SeenFill = NO_FILL
+let hadFill = false
 
 /** How long a spawn waits for its loop's first turn; one refused or run elsewhere starts none here. */
 const SPAWN_WAIT_MS = 30_000
@@ -1125,7 +1121,10 @@ export const register: Register = (on, options) => {
   // main chat's without an id); whether a loop is a subagent (a spawn
   // answered it, or $.agent.list() names it) is decided as the pane draws.
   on('turn.step', async function* ($, e, next) {
+    if (e.agentId === undefined) await quietly(() => lookForCompaction($))
     const r = yield* next(e)
+    // The main loop's response gives its window a fill.
+    if (e.agentId === undefined && r.usage !== null) hadFill = true
     await quietly(async () => {
       const loop = e.agentId ?? null
       await update($, agentLedger, ledger => withLedgerStep(ledger, loop, r.usage, effortText(e.effort)))
@@ -1136,6 +1135,7 @@ export const register: Register = (on, options) => {
   })
 
   on('turn.start', async ($, e, next) => {
+    if (e.agentId === undefined) await quietly(() => lookForCompaction($))
     const started = await next(e)
     await quietly(async () => {
       const at = await $.clock.now()
@@ -1263,7 +1263,6 @@ export const register: Register = (on, options) => {
     const measured = await next(e)
     await quietly(async () => {
       if (e.changed.includes('rateLimits')) await update($, limit, () => limitOf(e.rateLimits))
-      await quietly(() => countCompaction($, e.context))
       if (e.changed.includes('context')) await refreshContext($, false)
     })
     return measured
@@ -1298,7 +1297,7 @@ export const register: Register = (on, options) => {
         ranMs.clear()
         agentsAsking.clear()
         pendingSpawns = []
-        seenFill = NO_FILL
+        hadFill = false
         await update($, context, () => null)
         $.clock.after(1000, () => void quietly(() => refreshContext($, false)))
       })

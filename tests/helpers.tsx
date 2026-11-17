@@ -117,8 +117,12 @@ export type World = {
   tools?: string[]
   /** The session's project root: /proj by default */
   root?: string
-  /** The session's model, as `$.session.model()` names it: claude-opus-5-5 by default */
-  model?: string
+  /**
+   * The fill the plain `$.session.usage()` answers (the status line's): a
+   * number, or null while the live window has none (fresh, or just
+   * compacted). Left out, the breakdown's.
+   */
+  fill?: number | null
   /**
    * How the terminal answers a blit: `ok` draws pictures (Ghostty, kitty);
    * `alt` draws the alt instead (the default: a terminal without pictures);
@@ -165,11 +169,23 @@ export function engine(on: On, world: World = {}) {
   on('agent.list', () => ({ value: world.agents ?? [] }))
   on('tool.list', () => ({ value: (world.tools ?? []).map(name => ({ name, description: '', mcp: name.startsWith('mcp__') })) }))
   on('session.root', () => ({ value: world.root ?? '/proj' }))
-  on('session.model', () => ({ value: world.model ?? 'claude-opus-5-5' }))
-  on('session.usage', () => {
+  on('session.usage', (_, asked) => {
     const series = world.messages ?? [76 * K]
     const messages = series[Math.min(measured, series.length - 1)] ?? 76 * K
-    measured += 1
+    // The plain call is the status line's figures: it is no measurement of the series.
+    const isPlain = asked?.breakdown === undefined
+    if (!isPlain) measured += 1
+    if (isPlain && world.fill !== undefined) {
+      const window = world.window ?? 200 * K
+      const tokens = world.fill
+      return {
+        value: {
+          startedAt: 0,
+          context: tokens === null ? { window } : { window, tokens, percent: Math.round((tokens / window) * 100) },
+          rateLimits: world.rateLimits ?? [],
+        },
+      }
+    }
     const fill = breakdown(messages, world.autoCompact)
     fill.categories = [...fill.categories, ...(world.extra ?? [])]
     if (world.mcpTools !== undefined) fill.mcpTools = world.mcpTools
