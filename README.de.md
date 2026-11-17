@@ -31,6 +31,8 @@ Ein Mod für Claude Code: ein Retro-Terminal-Dashboard in einem Pane neben dem T
 
 Nox ist ein Pixelbild, wo das Terminal Bilder zeichnet (Ghostty, kitty; iTerm2 ab 3.5 mit Vollbild-Rendering; tmux mit eingeschaltetem `allow-passthrough` und `focus-events`), und überall sonst aus Blockzeichen. Nox liest, schreibt, arbeitet in der Shell, denkt nach, winkt, wenn ein Subagent startet, wartet auf dich, freut sich, wenn der Turn fertig ist, erschrickt bei einem Fehler, warnt vor einer Schleife, schwitzt, wenn der Kontext voll wird, wird müde, wenn das Limit, das STATUS zeigt, knapp wird (unter 20 % übrig), und gähnt und schläft nach zwei Minuten ohne Turn. Wo das Pane niedrig ist, nimmt eine Mini-Eule seinen Platz ein.
 
+**In Team- und Enterprise-Plänen oder wenn eine Organisation die Einstellungen von Claude Code verwaltet.** Dort kann Claude Code ein eingebautes Plugin vor deinen Plugins ausführen, das einige Ereignisse an anderen Plugins vorbeileitet. Kompaktierungen zählt noxdeck 1.1.1 auch dort. Vier Anzeigen bleiben darunter vorerst leer und sind für ein kommendes Release geplant: „braucht deine Freigabe“ an Nox, die Wartezeit der Freigabedialoge, Tool-Fehler in RADAR und die erschrockene Eule. In jedem Plan gilt: Nach `/compact` steigt der Zähler erst mit deiner nächsten Eingabe, nicht sofort.
+
 ## Installation
 
 Dieses Repository ist sein eigener Plugin-Marketplace: [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) nennt ein Plugin, `noxdeck`, aus dem Wurzelordner des Repositorys.
@@ -55,7 +57,7 @@ Aktualisieren: `claude plugin marketplace update noxdeck`, `claude plugin update
 
 ## Getestet mit
 
-Claude Code 2.1.319. Die Mod-API ist Early Access und kann sich zwischen Releases ändern.
+Claude Code 2.1.326. Die Mod-API ist Early Access und kann sich zwischen Releases ändern.
 
 ## Einstellungen
 

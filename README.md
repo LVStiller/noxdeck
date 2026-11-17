@@ -31,6 +31,8 @@ A Claude Code mod: a retro terminal dashboard in a pane beside the transcript, w
 
 Nox is a pixel picture where the terminal draws pictures (Ghostty, kitty; iTerm2 3.5 and later in fullscreen rendering; tmux with `allow-passthrough` and `focus-events` on) and block characters everywhere else. It reads, writes, runs the shell, thinks, waves when a subagent starts, waits for you, is glad when the turn is done, startles at a failure, warns of a loop, sweats when the context fills up, gets tired when the limit STATUS shows runs low (under 20 % left), and yawns and sleeps after two minutes without a turn. Where the pane is short, a mini owl takes its place.
 
+**On Team and Enterprise plans, or where an organization manages Claude Code's settings.** There Claude Code can run a built-in plugin ahead of yours that passes some events on past other plugins. noxdeck 1.1.1 counts compactions there too. Four displays stay empty under it for now and are planned for an upcoming release: "needs your approval" on Nox, the time approval dialogs waited on you, tool failures in RADAR, and the startled owl. On every plan, the compaction count rises with your next prompt after `/compact`, not at once.
+
 ## Installation
 
 This repository is its own plugin marketplace: [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) lists one plugin, `noxdeck`, from the repository root.
@@ -55,7 +57,7 @@ To update: `claude plugin marketplace update noxdeck`, `claude plugin update nox
 
 ## Tested with
 
-Claude Code 2.1.319. The mod API is early access and may change between releases.
+Claude Code 2.1.326. The mod API is early access and may change between releases.
 
 ## Settings
 
