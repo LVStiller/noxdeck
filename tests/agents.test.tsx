@@ -195,7 +195,7 @@ describe('Agents: tokens, model and activity per agent', () => {
       expect(has(texts, /^Verarbeitet = Summe aller Schritte, inkl\. Wiederholung aus dem Cache$/)).toBe(true)
       // The CONTEXT card still shows the main chat's window alone.
       await ui.press({ key: 'tab-live' })
-      expect(has(await ui.findAll({ type: 'Text' }), new RegExp(`^ ?${P(58)} · 116k / 200k ?$`))).toBe(true)
+      expect(has(await ui.findAll({ type: 'Text' }), new RegExp(`^ ?${P(58)} · 116k / 200k · 0×( komp\\.)? ?$`))).toBe(true)
       await ui.unmount()
     }
   })

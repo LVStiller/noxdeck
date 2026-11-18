@@ -75,10 +75,10 @@ In `/config`, each under `noxdeck.<name>`, or when installing in a shell with `-
 
 ## What this mod can do
 
-`claude plugin validate .` reads the hooks module the way Claude Code loads it and prints every event it hooks and every call it makes on `$`. For noxdeck 1.1.1:
+`claude plugin validate .` reads the hooks module the way Claude Code loads it and prints every event it hooks and every call it makes on `$`. For noxdeck 1.1.2:
 
 ```
-hooks: session.start, command.run{command=noxdeck}, ui.close{id=noxdeck}, tool.call, agent.spawn, tool.check, classic.PreToolUse, classic.PermissionRequest, classic.PermissionDenied, classic.PostToolUseFailure, classic.PostToolUse, turn.step, turn.start, turn.complete, session.measure, session.end, ui.render{component=Pane, requestId=noxdeck}, ui.render{component=SessionMode}
+hooks: session.start, command.run{command=noxdeck}, ui.close{id=noxdeck}, tool.call, agent.spawn, tool.check, classic.PreToolUse, classic.PermissionRequest, classic.PermissionDenied, classic.PostToolUseFailure, classic.PostToolUse, turn.step, turn.start, turn.complete, session.measure, session.end, ui.render{component=Pane, requestId=noxdeck} (default matcher key: plugin), ui.render{component=SessionMode}
 calls: $.agent.list, $.clock.after, $.clock.every (via ensureTicker), $.clock.now, $.command.register, $.session.root (via refreshRoot), $.session.usage (via lookForCompaction, refreshContext), $.settings.read (via readMotion), $.state.get, $.state.set, $.tool.list (via refreshTodoTools), $.ui.blit (via blit), $.ui.open (via openPane), $.ui.panes (via isPaneOpen, isPaneShown), $.ui.resolve, $.ui.toast, $.ui.view (via showView)
 ```
 

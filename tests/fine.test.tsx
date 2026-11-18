@@ -923,8 +923,8 @@ describe('fine Nox in the pane', () => {
     expect(await ui.find({ type: 'Text', text: '· bereit ' })).toBeDefined()
     await ui.unmount()
     // The picture of Nox is two rows taller than the blocks: it shows from two rows more.
-    expect(await shownPicture($, { rows: 32, columns: 48 })).toMatch(/^fineMini:/)
-    expect(await shownPicture($, { rows: 33, columns: 48 })).toMatch(/^fine:/)
+    expect(await shownPicture($, { rows: 31, columns: 48 })).toMatch(/^fineMini:/)
+    expect(await shownPicture($, { rows: 32, columns: 48 })).toMatch(/^fine:/)
     // Too narrow for the mini owl: none.
     expect(await shownPicture($, { rows: SHORT.rows, columns: 39 })).toBe('hidden')
   })

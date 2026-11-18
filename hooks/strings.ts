@@ -86,7 +86,9 @@ export type Strings = {
      * room is short; `untilCompact`, the tokens left until auto-compaction,
      * is left out when null (auto-compaction off).
      */
-    stats: (hit: string, untilCompact: string | null, compactions: number) => readonly string[]
+    stats: (hit: string, untilCompact: string | null) => readonly string[]
+    /** The compactions in the card's header, after the fill (`0× komp.`); where room is short the count alone stands (`0×`). */
+    compactions: (count: number) => string
   }
   status: {
     /** What the fine Nox's picture says where it cannot be drawn, and to a screen reader. */
@@ -254,12 +256,8 @@ const de: Strings = {
     moreFiles: count => `+${count} weitere ${count === 1 ? 'Datei' : 'Dateien'}`,
     listed: count => `${count} gelistet`,
     of: count => `von ${count}`,
-    stats: (hit, untilCompact, compactions) => [
-      `Cache Hit ${hit}`,
-      ...(untilCompact === null ? [] : [`noch ~${untilCompact} bis Compact`]),
-      `${compactions}× kompaktiert`,
-      'seit Laden',
-    ],
+    stats: (hit, untilCompact) => [`Cache Hit ${hit}`, ...(untilCompact === null ? [] : [`noch ~${untilCompact} bis Compact`])],
+    compactions: count => `${count}× komp.`,
   },
   status: {
     noxAlt: 'Nox, die Eule',
@@ -421,12 +419,8 @@ const en: Strings = {
     moreFiles: count => `+${count} more ${count === 1 ? 'file' : 'files'}`,
     listed: count => `${count} listed`,
     of: count => `of ${count}`,
-    stats: (hit, untilCompact, compactions) => [
-      `Cache Hit ${hit}`,
-      ...(untilCompact === null ? [] : [`~${untilCompact} left to Compact`]),
-      `compacted ${compactions}×`,
-      'since load',
-    ],
+    stats: (hit, untilCompact) => [`Cache Hit ${hit}`, ...(untilCompact === null ? [] : [`~${untilCompact} left to Compact`])],
+    compactions: count => `${count}× comp.`,
   },
   status: {
     noxAlt: 'Nox the owl',

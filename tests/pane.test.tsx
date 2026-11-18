@@ -222,8 +222,11 @@ describe('context', () => {
       // 167k, the auto-compact threshold, less the 116k measured: ~51k left. No peak.
       expect(await ui.find({ type: 'Text', text: `Cache Hit ${P(90)} · noch ~51k bis Compact` })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /Peak/ })).toBeUndefined()
-      // Cache hits and compactions count from noxdeck's load: the line says so.
-      expect(await ui.find({ type: 'Text', text: /^0× kompaktiert · seit Laden$/ })).toBeDefined()
+      // The compactions stand in the header, after the fill: the count alone in
+      // the terminal's border, where this width has no room for „komp.“.
+      const header = surface === 'terminal' ? ` ${P(58)} · 116k / 200k · 0× ` : `${P(58)} · 116k / 200k · 0× komp.`
+      expect((await ui.findAll({ type: 'Text' })).some(found => found.text === header)).toBe(true)
+      expect(await ui.find({ type: 'Text', text: /kompaktiert|seit Laden/ })).toBeUndefined()
       expect(await ui.find({ type: 'Text', text: /ⓘ/ })).toBeUndefined()
       expect(await ui.find({ type: 'Text', text: /main loop/ })).toBeUndefined()
       await ui.unmount()
@@ -243,12 +246,11 @@ describe('context', () => {
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
     // Measured at 70k after compacting: ~97k left.
     expect(await ui.find({ type: 'Text', text: `Cache Hit ${P(90)} · noch ~97k bis Compact` })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^1× kompaktiert · seit Laden$/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: `${P(35)} · 70k / 200k` })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: `${P(35)} · 70k / 200k · 1×` })).toBeDefined()
     await ui.unmount()
   })
 
-  test('the stats lines stand right under the growth line, the table of mcp, memory and skills after them', async ($, on) => {
+  test('the card\'s lines in order: the growth line, the table of mcp, memory and skills, the stats last', async ($, on) => {
     engine(on)
     await start($)
     for (const surface of SURFACES) {
@@ -256,11 +258,44 @@ describe('context', () => {
       const texts = (await ui.findAll({ type: 'Text' })).map(found => found.text)
       await ui.unmount()
       // The table's rows by what they name: the legend has an mcp and a memory of its own.
-      const lines = [/^Ø /, /^Cache Hit /, /^\d+× kompaktiert/, /^mcp +\d+ Server/, /^memory +CLAUDE\.md/, /^skills +\d+ gelistet/]
+      const lines = [/^Ø /, /^mcp +\d+ Server/, /^memory +CLAUDE\.md/, /^skills +\d+ gelistet/, /^Cache Hit .* bis Compact$/]
       const order = lines.map(line => texts.findIndex(text => line.test(text)))
       expect(order.every(index => index >= 0)).toBe(true)
       expect(order).toEqual([...order].sort((a, b) => a - b))
     }
+  })
+
+  test('the header holds the fill and the compactions: „komp.“ goes first, then the border\'s dashes, then the header moves into the body', async ($, on) => {
+    engine(on)
+    await start($)
+    const headerAt = async (bodyColumns: number) => {
+      const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns }, surface: 'terminal' })
+      const texts = (await ui.findAll({ type: 'Text' })).map(found => found.text)
+      await ui.unmount()
+      return texts.filter(text => /116k \/ 200k|^\d+×/.test(text))
+    }
+    const fill = `${P(58)} · 116k / 200k`
+    // In the border the text has a space on either side; in the body it has none.
+    expect(await headerAt(80)).toEqual([` ${fill} · 0× komp. `])
+    expect(await headerAt(60)).toEqual([` ${fill} · 0× komp. `])
+    // 50 columns hold title, two dashes and the long form exactly; one less, the count alone.
+    expect(await headerAt(50)).toEqual([` ${fill} · 0× komp. `])
+    expect(await headerAt(49)).toEqual([` ${fill} · 0× `])
+    expect(await headerAt(45)).toEqual([` ${fill} · 0× `])
+    // 44 columns: the count alone with two dashes; 43: with the one dash left; 42: no room in the border.
+    expect(await headerAt(44)).toEqual([` ${fill} · 0× `])
+    expect(await headerAt(43)).toEqual([` ${fill} · 0× `])
+    expect(await headerAt(42)).toEqual([`${fill} · 0× komp.`])
+    // Narrower than the long form: the count alone, on a row of its own where one does not hold both.
+    expect(await headerAt(30)).toEqual([fill, '0×'])
+  })
+
+  test('in English the header says comp.', { options: { language: 'en' } }, async ($, on) => {
+    engine(on)
+    await start($)
+    const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns: 60 }, surface: 'terminal' })
+    expect(await ui.find({ type: 'Text', text: ' 58% · 116k / 200k · 0× comp. ' })).toBeDefined()
+    await ui.unmount()
   })
 
   test('a compaction window set with /autocompact: mark, line, forecast and what is left follow the engine\'s threshold', async ($, on) => {
@@ -309,7 +344,8 @@ describe('context', () => {
       expect(await ui.find({ type: 'Text', text: `${P(52)} · 520k / 1M` })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: P(100).padStart(6) })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: 'Ø n/a/Turn · Auto-Compact aus' })).toBeDefined()
-      expect(await ui.find({ type: 'Text', text: 'Cache Hit n/a · 0× kompaktiert' })).toBeDefined()
+      expect((await ui.findAll({ type: 'Text' })).some(found => found.text === 'Cache Hit n/a')).toBe(true)
+      expect(await ui.find({ type: 'Text', text: `${P(52)} · 520k / 1M · 0× komp.` })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /bis Compact|Peak/ })).toBeUndefined()
       await ui.unmount()
     }
@@ -342,9 +378,9 @@ describe('compactions, counted by the fill a turn or a model request of the main
   /** How many compactions the CONTEXT card counts. */
   const counted = async ($: Engine) => {
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-    const line = await ui.find({ type: 'Text', text: /^\d+× kompaktiert/ })
+    const header = await ui.find({ type: 'Text', text: / · \d+×( komp\.)? ?$/ })
     await ui.unmount()
-    return Number.parseInt(line?.text ?? '', 10)
+    return Number.parseInt(/ · (\d+)×/.exec(header?.text ?? '')?.[1] ?? '', 10)
   }
   const TOKENS: TurnUsage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: 'claude-sonnet-5-5' }
 
@@ -960,8 +996,10 @@ describe('edge cases', () => {
     engine(on)
     await start($)
     const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns: 30 }, surface: 'terminal' })
-    expect(await ui.find({ type: 'Text', text: ` ${P(58)} · 116k / 200k ` })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: ` ${P(58)} · 116k / 200k` })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: `${P(58)} · 116k / 200k` })).toBeDefined()
+    // The compactions move with the fill: the count alone, on the row under it.
+    expect((await ui.findAll({ type: 'Text' })).some(found => found.text === '0×')).toBe(true)
     await ui.unmount()
   })
 
@@ -1255,14 +1293,15 @@ describe('state written by an older version (hot reload, /reload-plugins)', () =
     await start($)
     const stats = async () => {
       const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-      const lines = (await ui.findAll({ type: 'Text', text: /^(Cache Hit|\d+× kompaktiert)/ })).map(found => found.text)
+      // The stats line, last on the card, then the header (the estimate and the count): the border's texts are drawn after the card's.
+      const lines = (await ui.findAll({ type: 'Text', text: /^Cache Hit| · \d+× $/ })).map(found => found.text)
       await ui.unmount()
       return lines
     }
     // The breakdown's estimate, 116k, against the 167k threshold either way; the count tells which track was read.
-    expect(await stats()).toEqual(['Cache Hit n/a · noch ~51k bis Compact', '0× kompaktiert · seit Laden'])
+    expect(await stats()).toEqual(['Cache Hit n/a · noch ~51k bis Compact', ` ≈${P(58)} · ≈116k / 200k · 0× `])
     stored = { shape: 'noxdeck/7', value: kept }
-    expect(await stats()).toEqual(['Cache Hit n/a · noch ~51k bis Compact', '2× kompaktiert · seit Laden'])
+    expect(await stats()).toEqual(['Cache Hit n/a · noch ~51k bis Compact', ` ≈${P(58)} · ≈116k / 200k · 2× `])
   })
 })
 
@@ -1469,9 +1508,9 @@ describe('the limit STATUS shows: the 5h window, else the week\'s for all models
           await ui.unmount()
         }
       }
-      // A row less: Nox shows from 30 rows, one fewer than with a limit line.
-      expect(owlOf(await shownPose($, 'terminal', { rows: 30, columns: 48 }))).toBe('nox')
-      expect(owlOf(await shownPose($, 'terminal', { rows: 29, columns: 48 }))).toBe('mini')
+      // A row less: Nox shows from 29 rows, one fewer than with a limit line.
+      expect(owlOf(await shownPose($, 'terminal', { rows: 29, columns: 48 }))).toBe('nox')
+      expect(owlOf(await shownPose($, 'terminal', { rows: 28, columns: 48 }))).toBe('mini')
     })
 
     test(`${language}: each measurement picks the window anew: none, the week's, the 5h, none again`, { options }, async ($, on) => {
@@ -1610,7 +1649,7 @@ describe('the Live tab when the pane is short', () => {
     // RADAR: the warning (two rows at this width), the failures, the hotspots, in its frame: 6 rows.
     // STATUS: the warning, the edit line, the limit, the caption in its frame: 7 rows, 13 with Nox;
     // with the mini owl beside the two lines instead of the caption, 7 as well.
-    // The pane's frame takes 4, CONTEXT 15.
+    // The pane's frame takes 4, CONTEXT 14.
     const at = async (rows: number) => {
       const texts = await textsAt($, rows)
       return {
@@ -1621,13 +1660,13 @@ describe('the Live tab when the pane is short', () => {
         hasCaption: has(texts, MOOD),
       }
     }
-    expect(await at(38)).toEqual({ owl: 'nox', hasErrors: true, hasHotspots: true, isWarningFirst: true, hasCaption: true })
-    expect(await at(37)).toEqual({ owl: 'mini', hasErrors: true, hasHotspots: true, isWarningFirst: true, hasCaption: false })
-    expect(await at(32)).toEqual({ owl: 'mini', hasErrors: true, hasHotspots: true, isWarningFirst: true, hasCaption: false })
-    expect(await at(31)).toEqual({ owl: 'mini', hasErrors: true, hasHotspots: false, isWarningFirst: true, hasCaption: false })
-    expect(await at(30)).toEqual({ owl: 'mini', hasErrors: false, hasHotspots: false, isWarningFirst: true, hasCaption: false })
+    expect(await at(37)).toEqual({ owl: 'nox', hasErrors: true, hasHotspots: true, isWarningFirst: true, hasCaption: true })
+    expect(await at(36)).toEqual({ owl: 'mini', hasErrors: true, hasHotspots: true, isWarningFirst: true, hasCaption: false })
+    expect(await at(31)).toEqual({ owl: 'mini', hasErrors: true, hasHotspots: true, isWarningFirst: true, hasCaption: false })
+    expect(await at(30)).toEqual({ owl: 'mini', hasErrors: true, hasHotspots: false, isWarningFirst: true, hasCaption: false })
+    expect(await at(29)).toEqual({ owl: 'mini', hasErrors: false, hasHotspots: false, isWarningFirst: true, hasCaption: false })
     // No room for one RADAR row: no card at all, STATUS and CONTEXT whole.
-    const none = await textsAt($, 28)
+    const none = await textsAt($, 27)
     expect(has(none, /^ RADAR $/)).toBe(false)
     expect(has(none, /^ CONTEXT $/) && has(none, /^ STATUS $/)).toBe(true)
   })
@@ -1637,9 +1676,9 @@ describe('the Live tab when the pane is short', () => {
     on('tool.call', (_, e) => ({ result: { oldTodos: [], newTodos: e.tool === 'TodoWrite' ? e.todos : [] } }))
     await start($)
     await $.tool.call({ tool: 'TodoWrite', todos: [...TODOS] })
-    // PLAN: four steps in its frame, 6 rows; STATUS without Nox 5; frame 4; CONTEXT 15.
-    expect(has(await textsAt($, 30), /^Read the styles$/)).toBe(true)
-    const short = await textsAt($, 29)
+    // PLAN: four steps in its frame, 6 rows; STATUS without Nox 5; frame 4; CONTEXT 14.
+    expect(has(await textsAt($, 29), /^Read the styles$/)).toBe(true)
+    const short = await textsAt($, 28)
     expect(has(short, /^Wiring it into the header$/)).toBe(true)
     expect(has(short, /^Run the tests$/)).toBe(true)
     expect(has(short, /^Read the styles$/)).toBe(false)

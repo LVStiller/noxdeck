@@ -210,10 +210,14 @@ export function frame(ui: Ui, tab: Tab, onTab: (tab: Tab) => void, body: RenderC
  * title there (or in the heading row elsewhere) moves into the body,
  * right-aligned, broken only between its parts.
  */
-/** Whether a card's counter fits beside its title (in the border on the terminal). */
-function isCounterBesideOf(ui: Ui, title: string, counter: readonly string[] | null): boolean {
+/**
+ * Whether a card's counter fits beside its title (in the border on the
+ * terminal, with `dashes` of the border's line left between the two: two,
+ * or the one a card with more to say there keeps).
+ */
+function isCounterBesideOf(ui: Ui, title: string, counter: readonly string[] | null, dashes = 2): boolean {
   const joined = counter === null ? null : counter.join(' · ')
-  return joined !== null && (ui.surface === 'terminal' ? title.length + joined.length + 10 <= ui.width : title.length + 1 + joined.length <= inner(ui))
+  return joined !== null && (ui.surface === 'terminal' ? title.length + joined.length + 8 + dashes <= ui.width : title.length + 1 + joined.length <= inner(ui))
 }
 
 /** Rows a card takes besides its body: its frame, and a counter moved into the body. */
@@ -235,6 +239,7 @@ function card(
   body: RenderChildren,
   bodyRows: number,
   note: TitleNote | null = null,
+  dashes = 2,
 ): Drawn {
   const { Box, Text, theme } = ui
   const isInBorder = ui.surface === 'terminal'
@@ -245,7 +250,7 @@ function card(
         {text}
       </Text>
     )
-  const isCounterBeside = isCounterBesideOf(ui, title, counter)
+  const isCounterBeside = isCounterBesideOf(ui, title, counter, dashes)
   const counterRows =
     counter !== null && !isCounterBeside
       ? flowParts(counter, inner(ui)).map(line => (
@@ -526,6 +531,27 @@ const sourceColor = (theme: Theme, key: string, fallback: string): Color => them
 
 const LABEL_WIDTH = 6
 
+/** The fewest dashes of its border the CONTEXT card keeps between its title and its header's figures. */
+const CONTEXT_DASHES = 1
+
+/**
+ * The CONTEXT card's header: the fill, then the compactions (`0× komp.`).
+ * Where the row is short the count alone stands (`0×`), then the border's
+ * dashes between title and figures go down to one; a header that still
+ * finds no room moves into the card's body, as every card's does, so the
+ * fill and the count always show.
+ */
+function contextHeader(ui: Ui, fill: readonly string[], compactions: number): { counter: readonly string[]; dashes: number } {
+  const title = ui.s.titles.context
+  const long = [...fill, ui.s.context.compactions(compactions)]
+  const short = [...fill, `${compactions}×`]
+  if (isCounterBesideOf(ui, title, long)) return { counter: long, dashes: 2 }
+  if (isCounterBesideOf(ui, title, short)) return { counter: short, dashes: 2 }
+  if (isCounterBesideOf(ui, title, short, CONTEXT_DASHES)) return { counter: short, dashes: CONTEXT_DASHES }
+  // In the body: the long form where one row holds it.
+  return { counter: long.join(' · ').length <= inner(ui) ? long : short, dashes: 2 }
+}
+
 /** The window's fill as the card's header writes it: measured figures plainly, the breakdown's estimates with ≈. */
 function contextCounter(ui: Ui, context: ContextSnapshot): readonly string[] {
   const { s } = ui
@@ -608,12 +634,15 @@ function growthWords(ui: Ui, context: ContextSnapshot, usage: UsageTrack): { per
 
 export function contextCard(ui: Ui, context: ContextSnapshot | null, usage: UsageTrack): Drawn {
   const { Box, Text, theme, s } = ui
-  if (context === null) return card(ui, s.titles.context, [s.na], <Text dimColor>{s.context.notMeasured}</Text>, 1)
+  if (context === null) {
+    const unmeasured = contextHeader(ui, [s.na], usage.compactions)
+    return card(ui, s.titles.context, unmeasured.counter, <Text dimColor>{s.context.notMeasured}</Text>, 1, null, unmeasured.dashes)
+  }
 
   const width = inner(ui)
   // One window for the whole card: header, bar, legend, mark and history agree.
   const max = context.window
-  const counter = contextCounter(ui, context)
+  const header = contextHeader(ui, contextCounter(ui, context), usage.compactions)
 
   const items = legendItemsOf(ui, context)
   const legend = legendLines(items, width)
@@ -650,8 +679,7 @@ export function contextCard(ui: Ui, context: ContextSnapshot | null, usage: Usag
   const current = contextTokens(context)
   const { perTurn, compactIn } = growthWords(ui, context, usage)
 
-  // The breakdown, last on the card, under the growth and stats lines: a
-  // table, label grey, name bright, value right-aligned.
+  // The breakdown: a table, label grey, name bright, value right-aligned.
   const labelWidth = Math.max(s.rows.mcp.length, s.rows.memory.length, s.rows.skills.length) + 1
   const row = (label: string, name: string, detail: string, value: string) =>
     spread(
@@ -693,17 +721,17 @@ export function contextCard(ui: Ui, context: ContextSnapshot | null, usage: Usag
   // What is left until auto-compaction runs, rounded (~0 at or past the
   // threshold); left out with auto-compaction off.
   const untilCompact = context.threshold === null ? null : tokens(ui, Math.max(0, context.threshold - current))
-  const stats = flowParts(s.context.stats(hit, untilCompact, usage.compactions), width)
+  const stats = flowParts(s.context.stats(hit, untilCompact), width)
   const growthLines = flowParts([perTurn, compactIn], width)
   const tableRows = 1 + memoryRows.length + (context.memory.length > 3 ? 1 : 0) + 1
   // Growth and stats lines wrap where a part is wider than the card: counted as drawn.
   const lineRows = (lines: readonly string[]) => lines.reduce((sum, line) => sum + wrappedRows(line, width), 0)
-  const rows = 1 + legend.lines.length + 1 + chart.length + lineRows(growthLines) + lineRows(stats) + tableRows
+  const rows = 1 + legend.lines.length + 1 + chart.length + lineRows(growthLines) + tableRows + lineRows(stats)
 
   return card(
     ui,
     s.titles.context,
-    counter,
+    header.counter,
     [
     contextBar(ui, context, width),
     ...legend.lines.map((line, row) => legendRow(line, row)),
@@ -725,7 +753,6 @@ export function contextCard(ui: Ui, context: ContextSnapshot | null, usage: Usag
       </Text>
     )),
     ...growthLines.map(line => <Text dimColor>{line}</Text>),
-    ...stats.map(line => <Text dimColor>{line}</Text>),
     mcpRow,
     ...memoryRows,
     more(context.memory.length - 3, s.context.moreFiles),
@@ -737,8 +764,11 @@ export function contextCard(ui: Ui, context: ContextSnapshot | null, usage: Usag
           context.skills.listed < context.skills.total ? s.context.of(context.skills.total) : '',
           estimate(context.skills.tokens),
         ),
+    ...stats.map(line => <Text dimColor>{line}</Text>),
     ],
     rows,
+    null,
+    header.dashes,
   )
 }
 

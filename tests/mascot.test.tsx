@@ -649,8 +649,8 @@ describe('mascot Nox: the animations option, pausing, room', () => {
     await start($)
     // Nox shows only while all of Live fits with it: the pane's frame (4 rows,
     // 5 off the terminal), STATUS with the owl (11, 12 with a title row),
-    // CONTEXT (15, 16) and RADAR's one line.
-    const boundary = { terminal: 31, desktop: 34 } as const
+    // CONTEXT (14, 15) and RADAR's one line.
+    const boundary = { terminal: 30, desktop: 33 } as const
     for (const surface of SURFACES) {
       expect(owlOf(await shownPose($, surface, { rows: boundary[surface] - 1, columns: 48 }))).toBe('mini')
       expect(owlOf(await shownPose($, surface, { rows: boundary[surface], columns: 48 }))).toBe('nox')
@@ -800,22 +800,25 @@ describe('Mini-Nox: the small owl where the pane is short', () => {
     await start($)
     // Nox takes all of Live with it: the pane's frame (4 rows), STATUS with
     // Nox (12: the edit line, the 5h limit, its reset, six rows of owl and
-    // the caption in its frame), CONTEXT (15 at 45 and 70 columns, where its
-    // stats take two lines; 16 at 40, three) and RADAR's one line: 32 rows,
+    // the caption in its frame), CONTEXT (14 at 45 and 70 columns, where its
+    // stats take one line; 16 at 40, where they take two and the header has
+    // left the border for a row of the body) and RADAR's one line: 31 rows,
     // 33 at 40 columns. Below that the mini owl, from 40 columns; narrower, none.
     const found: Record<number, Record<number, string>> = {}
-    for (const rows of [26, 32, 40]) {
+    for (const rows of [26, 30, 31, 32, 40]) {
       found[rows] = {}
       for (const columns of [39, 40, 45, 70]) found[rows][columns] = owlOf(await shownPose($, 'terminal', { rows, columns }))
     }
     expect(found).toEqual({
       26: { 39: 'none', 40: 'mini', 45: 'mini', 70: 'mini' },
+      30: { 39: 'none', 40: 'mini', 45: 'mini', 70: 'mini' },
+      31: { 39: 'none', 40: 'mini', 45: 'nox', 70: 'nox' },
       32: { 39: 'none', 40: 'mini', 45: 'nox', 70: 'nox' },
       40: { 39: 'nox', 40: 'nox', 45: 'nox', 70: 'nox' },
     })
     const statsLines = async (columns: number) =>
-      (await textsAt($, 40, columns)).filter(found => /^(Cache Hit |noch ~)|seit Laden$/.test(found.text)).length
-    expect([await statsLines(40), await statsLines(45), await statsLines(70)]).toEqual([3, 2, 2])
+      (await textsAt($, 40, columns)).filter(found => /^(Cache Hit |noch ~)/.test(found.text)).length
+    expect([await statsLines(40), await statsLines(45), await statsLines(70)]).toEqual([2, 1, 1])
   })
 
   test('a resize swaps the owls on the drawing as it stands, either way, with no reload', async ($, on) => {
@@ -832,7 +835,7 @@ describe('Mini-Nox: the small owl where the pane is short', () => {
       [{ rows: 40, columns: 52 }, 'nox'],
       [{ rows: 26, columns: 52 }, 'mini'],
       [{ rows: 40, columns: 52 }, 'nox'],
-      [{ rows: 31, columns: 52 }, 'mini'],
+      [{ rows: 30, columns: 52 }, 'mini'],
       [{ rows: 32, columns: 70 }, 'nox'],
       [{ rows: 26, columns: 39 }, 'none'],
       [{ rows: 26, columns: 45 }, 'mini'],
