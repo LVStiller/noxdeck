@@ -17,7 +17,7 @@ To draw its pane, noxdeck reads what Claude Code passes to its hooks during the 
 
 noxdeck keeps its figures in its own `$.state`: values Claude Code holds in memory for the running session. Like any mod's state, other mods running in the same session can read these values.
 
-One figure outlasts the session, so that a conversation you continue keeps its count: how often each conversation was compacted. noxdeck keeps it in its own `$.store`, a JSON file Claude Code keeps for the plugin in your Claude Code configuration folder on this machine. An entry holds a short hash of the conversation's session id (the first 16 hex characters of its SHA-256, never the id itself), the count and a timestamp, and nothing else. Entries not written for more than 30 days are removed, and all but the newest 50.
+One figure outlasts the session, so that a conversation you continue keeps its count: how often each conversation was compacted. noxdeck keeps it in its own `$.store`: a JSON file that Claude Code keeps for the plugin under `plugins/store/` in your Claude Code configuration folder (by default `~/.claude/plugins/store/`), on this machine. An entry holds a short hash of the conversation's session id (the first 16 hex characters of its SHA-256, never the id itself), the count and a timestamp, and nothing else. At the start of a session, entries not written for more than 30 days are removed, and all but the newest 50. Nothing of it leaves your machine: noxdeck makes no network requests, and only Claude Code reads and writes the file, for noxdeck.
 
 ## Ko-fi
 
