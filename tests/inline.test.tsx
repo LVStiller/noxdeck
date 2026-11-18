@@ -109,7 +109,8 @@ async function live($: Engine, terminal: number, bodyRows = 12, isFullscreen = t
 /** Two columns as a side-by-side row: `left` in its cells, then `right`. */
 const beside = (left: string, cells: number, right: string) => `${left.padEnd(cells)}${right}`
 /** The columns' title row: CONTEXT and its fill in `width` cells. */
-const contextHead = (width: number) => `CONTEXT${'58 % · 116k / 200k'.padStart(width - 7)}`
+/** CONTEXT's title row beside STATUS: the fill and the compactions, `komp.` where the row has the cells for it. */
+const contextHead = (width: number) => `CONTEXT${(width >= 37 ? '58 % · 116k / 200k · 0× komp.' : '58 % · 116k / 200k · 0×').padStart(width - 7)}`
 
 /** A reset time as a local date: Wednesday, November 11, 2026 at `hours`:`minutes`. */
 const wednesday = (hours: number, minutes: number) => new Date(2026, 10, 11, hours, minutes).toISOString()

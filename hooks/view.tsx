@@ -3114,7 +3114,12 @@ function legendRowOf(ui: Ui, context: ContextSnapshot, width: number): RenderEle
   return partsRow(ui, line.cut > 0 ? [...parts, gap(line.gap), { text: `+${line.cut}`, ...DIM }] : parts, width)
 }
 
-/** CONTEXT beside STATUS: its title and fill, the bar, the legend, the growth, shorter only beside the owl and only where it must be. */
+/**
+ * CONTEXT beside STATUS: its title, fill and compactions (`0× komp.`, the
+ * count alone where the row is short, none where even that finds no room),
+ * the bar, the legend, the growth, shorter only beside the owl and only
+ * where it must be.
+ */
 function contextRows(ui: Ui, context: ContextSnapshot | null, usage: UsageTrack, width: number, isBesideOwl: boolean): RenderElement[] {
   const { Box, Text, s } = ui
   const head = (counter: string) => (
@@ -3127,8 +3132,14 @@ function contextRows(ui: Ui, context: ContextSnapshot | null, usage: UsageTrack,
   const { perTurn, compactIn, short } = growthWords(ui, context, usage)
   const long = `${perTurn} · ${compactIn}`
   const growth = isBesideOwl && cellsOf(long) > width ? short : long
+  // The title, a cell between, the figures: the longest form the row holds.
+  const fill = contextCounter(ui, context)
+  const room = width - cellsOf(s.titles.context) - 1
+  const counter =
+    [[...fill, s.context.compactions(usage.compactions)], [...fill, `${usage.compactions}×`]].map(parts => parts.join(' · ')).find(text => cellsOf(text) <= room) ??
+    fill.join(' · ')
   return [
-    head(contextCounter(ui, context).join(' · ')),
+    head(counter),
     contextBar(ui, context, width),
     legendRowOf(ui, context, width),
     partsRow(ui, [{ text: growth, ...DIM }], width),
