@@ -2,7 +2,7 @@ import { describe, expect } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { AgentInfo, On, SessionRateLimit } from 'claude-code'
 import { cellsOf } from '../hooks/view'
-import { BAR, engine, failedRun, K, PANE, READ_RESULT, SPAWN, start, SURFACES, test, TODOS } from './helpers'
+import { ASK, BAR, engine, FAILED, K, PANE, READ_RESULT, SPAWN, start, SURFACES, test, TODOS } from './helpers'
 import type { World } from './helpers'
 
 // The pane seated inline above the prompt. What the engine takes around the
@@ -132,8 +132,8 @@ const GROWTH_SHORT = 'Ø +14k/Turn · Compact ~4 Turns'
 async function session($: Engine, on: On, world: World = {}, isFullscreen = true) {
   const limits = world.rateLimits ?? [WEEK]
   const clock = engine(on, { messages: [76 * K, 76 * K, 62 * K, 76 * K], ...world, rateLimits: limits })
-  on('tool.call', (_, e) => {
-    if (e.tool === 'Bash') return failedRun($, e)
+  on('tool.run', (_, e) => {
+    if (e.tool === 'Bash') return FAILED
     if (e.tool === 'TodoWrite') return { result: { oldTodos: [], newTodos: e.todos } }
     return e.tool === 'Edit' ? { result: { filePath: e.file_path, structuredPatch: [], originalFile: 'x' } } : READ_RESULT
   })
@@ -495,17 +495,23 @@ describe('what does not fit is cut visibly', () => {
   })
 
   test('an approval waits in the accent, in both views', async ($, on) => {
-    on('classic.PermissionRequest', () => ({}))
-    await session($, on)
-    await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'x' } })
+    const outer = $
     const accent = async (terminal: number) => {
-      const ui = await $.ui.mount({ ...inline(terminal), surface: 'terminal' })
+      const ui = await outer.ui.mount({ ...inline(terminal), surface: 'terminal' })
       const texts = await ui.findAll({ type: 'Text' })
       await ui.unmount()
       return texts.some(found => found.props.color === 'claude' && /Freigabe/.test(String((found as unknown as { text: string }).text)))
     }
-    expect(await accent(60)).toBe(true)
-    expect(await accent(100)).toBe(true)
+    let seen: boolean[] = []
+    // The check puts the call to the person; while the dialog stands, both views say so.
+    on('tool.check', () => ASK)
+    on('classic.PermissionRequest', async () => {
+      seen = [await accent(60), await accent(100)]
+      return {}
+    })
+    await session($, on)
+    await $.tool.call({ tool: 'Bash', command: 'x', tool_use_id: 'tu-1' })
+    expect(seen).toEqual([true, true])
   })
 })
 

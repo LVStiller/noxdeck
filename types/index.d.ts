@@ -113,9 +113,9 @@ export type Activity = {
 export type ToolKind = 'read' | 'edit' | 'shell' | 'ask' | 'approve' | 'other'
 
 /**
- * A permission dialog open now: the call it was raised for (its tool_use_id
- * when tool.check named it, else null), its tool, and its loop (null: the
- * main loop).
+ * A permission dialog open now: the call it was raised for (its
+ * tool_use_id; null only in a value a version before 1.1.2 kept), its tool,
+ * and its loop (null: the main loop).
  */
 export type Ask = { id: string | null; tool: string; agentId: string | null }
 
@@ -123,7 +123,7 @@ export type Ask = { id: string | null; tool: string; agentId: string | null }
 export type Cues = {
   /** The main loop's tool calls running now, oldest first. */
   running: { id: string; kind: ToolKind }[]
-  /** The permission dialogs open now; each ends with its call, or when a hook decides it. */
+  /** The permission dialogs open now; each ends when its call is allowed, or with its call. */
   asking: Ask[]
   /** When the last main-loop tool call or main turn failed. */
   startledAt: number | null
@@ -135,7 +135,7 @@ export type Cues = {
   waitedMs: number
   /** Since when one is open; null while none is. */
   waitingSince: number | null
-  /** A dialog's end was taken from its call's end, after the tool ran: the sum is approximate. */
+  /** A dialog's end was taken from its call's end, the tool's run in it (its start was not heard): the sum is approximate. */
   isWaitApprox: boolean
   /** Approval dialogs opened (a question to answer is none). */
   approvals: number

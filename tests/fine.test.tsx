@@ -56,7 +56,7 @@ import {
   posesOver,
   framesIn,
   READ_RESULT,
-  failedRun,
+  FAILED,
 } from './helpers'
 import type { World, Found, Size } from './helpers'
 
@@ -984,9 +984,9 @@ describe('fine Nox in the pane', () => {
       const world: World = { ...PICTURES, blits: [] }
       const clock = engine(on, world)
       const outer = $
-      on('tool.call', async (_, e) => {
+      on('tool.run', async (_, e) => {
         await clock.advance(3000)
-        return e.tool === 'Bash' ? failedRun(outer, e) : READ_RESULT
+        return e.tool === 'Bash' ? FAILED : READ_RESULT
       })
       await startWithPictures($, clock)
       const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -1052,7 +1052,7 @@ describe('fine Nox in the pane', () => {
 
   test('a failure: fehler; a failure in a loop: the loop warning, the picture in the pane', { options: FEIN }, async ($, on) => {
     const clock = engine(on, PICTURES)
-    on('tool.call', (_, e) => failedRun($, e))
+    on('tool.run', (_, e) => FAILED)
     await startWithPictures($, clock)
     await $.turn.start({ text: '', turnId: 't1' })
     await $.tool.call({ tool: 'Bash', command: 'npm test', description: 'Run the tests' })

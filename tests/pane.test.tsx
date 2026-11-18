@@ -29,12 +29,17 @@ import {
   MINUTE,
   HOUR,
   ANSWERED,
-  failedRun,
+  FAILED,
   textsAt,
   has,
   SESSION,
   SESSION_KEY,
+  ALLOWED,
+  BASH_OK,
+  posesOver,
+  framesIn,
 } from './helpers'
+import { register } from '../hooks/register'
 import type { World, Found, Size } from './helpers'
 import { GUARD } from './guard'
 import type { PlanStep } from '../types'
@@ -782,13 +787,13 @@ describe('status', () => {
     const clock = engine(on, { rateLimits: [{ kind: 'five_hour', percentUsed: 30 }] })
     // While the Edit runs beneath the plugin, the pane already says so.
     const editingSeen: (string | undefined)[] = []
-    on('tool.call', async (_, e) => {
+    on('tool.run', async (_, e) => {
       const ui = await outer.ui.mount({ ...PANE, surface: 'terminal' })
       // The STATUS card's line (JETZT lists the call itself as `✎ Edit …`).
       const line = await ui.find({ type: 'Text', text: /^✎ (bearbeitet|noch)/ })
       editingSeen.push(`${line?.text} ${String(line?.props.color)}`)
       await ui.unmount()
-      if (e.tool === 'Bash') return failedRun(outer, e)
+      if (e.tool === 'Bash') return FAILED
       return { result: { filePath: '/proj/src/Toggle.tsx', structuredPatch: [], originalFile: '' } }
     })
     await start($)
@@ -1036,37 +1041,89 @@ describe('changes', () => {
 })
 
 describe('observer', () => {
-  test('the permission hooks and agent.spawn pass their events on unchanged and what answered them back as it came', async ($, on) => {
+  test('tool.check hands back the verdict it heard, whole and unchanged, for allow, ask and deny', async ($, on) => {
     engine(on)
     const seen: unknown[] = []
-    const verdict = { decision: 'deny' as const, reason: 'Bash(rm:*) is denied' }
-    const decided = { decision: { behavior: 'allow' as const } }
-    const spawned = { model: 'm', agentId: 'a1' }
-    on('tool.check', (_, e) => (seen.push(e), verdict))
-    on('classic.PermissionRequest', (_, e) => (seen.push(e), decided))
-    on('classic.PermissionDenied', (_, e) => (seen.push(e), {}))
-    on('agent.spawn', (_, e) => (seen.push(e), spawned))
+    // Each with the fields a verdict of the engine's can carry (the types'), so one added, dropped or changed shows.
+    const verdicts = {
+      allow: { decision: 'allow', reason: 'Bash(ls:*) is allowed', rule: 'Bash(ls:*)' },
+      ask: { decision: 'ask', reason: 'reads outside the working directories', hook: 'PreToolUse', setting: 'permissions.blockReadsOutsideWorkingDirectories' },
+      deny: { decision: 'deny', reason: 'Bash(rm:*) is denied', rule: 'Bash(rm:*)' },
+    } as const
+    type Want = keyof typeof verdicts
+    on('tool.check', (_, e) => (seen.push(e), verdicts[(e.input as { want: Want }).want]))
     await start($)
-    const check = { tool: 'Bash', input: { command: 'rm -rf /' }, tool_use_id: 'tu-1' }
-    const request = { tool_name: 'Bash', tool_input: { command: 'ls' } }
-    const denied = { tool_name: 'Bash', tool_input: { command: 'rm x' }, tool_use_id: 'tu-3', reason: 'auto mode' }
-    const spawn = { ...SPAWN, description: 'look around' }
-    expect(await $.tool.check(check as never)).toEqual(verdict)
-    expect(await $.classic.PermissionRequest(request)).toEqual(decided)
-    expect(await $.classic.PermissionDenied(denied)).toEqual({})
-    expect(await $.agent.spawn(spawn)).toEqual(spawned)
-    for (const [i, sent] of [check, request, denied, spawn].entries()) expect(seen[i]).toMatchObject(sent)
+    for (const want of ['allow', 'ask', 'deny'] as const) {
+      const check = { tool: 'Bash', input: { want }, tool_use_id: `tu-${want}` }
+      // The hook returns the very object `next(e)` resolved to. The kit hands an answer on as a copy,
+      // so what can be compared here is the value: every field, and no other.
+      const got = await $.tool.check(check as never)
+      expect(got).toEqual(verdicts[want])
+      expect(Object.keys(got).sort()).toEqual(Object.keys(verdicts[want]).sort())
+      expect(seen.at(-1)).toMatchObject(check)
+    }
   })
 
-  test('a PreToolUse hook beneath hears the call as it came', async ($, on) => {
+  test('tool.judge, tool.run and agent.spawn pass their events on unchanged and what answered them back as it came', async ($, on) => {
     engine(on)
     const seen: unknown[] = []
-    on('classic.PreToolUse', (_, e) => (seen.push(e), {}))
-    on('tool.call', () => ({ result: { stdout: '', stderr: '', interrupted: false } }))
+    // Invented: a tool.judge and a tool.run as the types give their inputs and answers; no session has been recorded with either.
+    const judged = { decision: 'allow' as const, reason: 'a read in the working directory' }
+    const ran = { result: { stdout: 'ok', stderr: '', interrupted: false } }
+    const spawned = { model: 'm', agentId: 'a1' }
+    on('tool.judge', (_, e) => (seen.push(e), judged))
+    on('tool.run', (_, e) => (seen.push(e), ran))
+    on('agent.spawn', (_, e) => (seen.push(e), spawned))
     await start($)
-    await $.tool.call({ tool: 'Bash', command: 'curl -sSL https://example.com/data.json', tool_use_id: 'tu-2' })
-    expect(seen).toEqual([{ tool: 'Bash', command: 'curl -sSL https://example.com/data.json', tool_use_id: 'tu-2' }])
+    const judge = { tool: 'Bash', input: { command: 'ls' }, tool_use_id: 'tu-1' }
+    const run = { tool: 'Bash', command: 'ls', tool_use_id: 'tu-1' }
+    const spawn = { ...SPAWN, description: 'look around' }
+    expect(await $.tool.judge(judge as never)).toEqual(judged)
+    expect(await $.tool.run(run as never)).toEqual(ran)
+    expect(await $.agent.spawn(spawn)).toEqual(spawned)
+    for (const [i, sent] of [judge, run, spawn].entries()) expect(seen[i]).toMatchObject(sent)
   })
+
+  test('no classic event is hooked: the built-in guard has nothing of noxdeck\'s to send past it', () => {
+    const hooked: string[] = []
+    register(((event: string) => void hooked.push(event)) as never, {} as never)
+    expect(hooked.filter(event => event.startsWith('classic.'))).toEqual([])
+    // What tells a dialog, the classifier and a run in their place.
+    for (const event of ['tool.call', 'tool.check', 'tool.judge', 'tool.run']) expect(hooked.includes(event)).toBe(true)
+    expect(hooked.includes('session.compact')).toBe(false)
+  })
+
+  for (const [where, above] of [['with no plugin above', {}], ['under Claude Code\'s built-in guard', { plugins: [GUARD] }]] as const) {
+    test(`${where}: a failing command counts in RADAR and startles Nox; a call put to the person says „braucht deine Freigabe“ and counts its wait`, above, async ($, on) => {
+      const clock = engine(on)
+      const outer = $
+      let caption: string | undefined
+      // The two commands recorded under the guard on 17 November 2026 (Claude Code 2.1.326): `ls` of a
+      // folder that is not there came back errored, `touch` was asked about (tool.check: ask) and its
+      // call ended 22 s later. Invented until recorded: the run's answer and that tool.run arrives.
+      on('tool.check', (_, e) => ({ decision: e.tool_use_id === 'tu-touch' ? 'ask' : 'allow' }))
+      on('classic.PermissionRequest', async () => {
+        await clock.advance(22_000)
+        const ui = await outer.ui.mount({ ...PANE, surface: 'terminal' })
+        caption = (await captionOf(ui))?.text
+        await ui.unmount()
+        return ALLOWED
+      })
+      on('tool.run', (_, e) => (e.tool_use_id === 'tu-ls' ? FAILED : BASH_OK))
+      await start($)
+      await $.turn.start({ text: '', turnId: 't1' })
+      await $.tool.call({ tool: 'Bash', command: 'ls /nicht-vorhanden-noxdeck', tool_use_id: 'tu-ls' })
+      expect(framesIn(await posesOver($, clock, 1000))).toContain('startled')
+      expect(has(await textsAt($), /^Fehler 1 · zuletzt Bash gerade eben$/)).toBe(true)
+      await $.tool.call({ tool: 'Bash', command: 'touch freigabe-test.txt', tool_use_id: 'tu-touch' })
+      expect(caption).toBe('braucht deine Freigabe')
+      // The wait to the moment the call was allowed, exact; one approval; still one failure.
+      const texts = await textsAt($)
+      expect(has(texts, /^Wartezeit 0:22 · 1 Freigabe$/)).toBe(true)
+      expect(has(texts, /^Fehler 1 · /)).toBe(true)
+    })
+  }
+
 
   test('tool calls and compactions pass through unchanged, results come back as answered', async ($, on) => {
     engine(on)
@@ -1858,7 +1915,7 @@ describe('the Live tab', () => {
 describe('the Live tab when the pane is short', () => {
   test('Nox goes first, STATUS keeps its lines; then RADAR loses its last rows; the loop warning stays on top', async ($, on) => {
     engine(on, TWO_LINES)
-    on('tool.call', (_, e) => (e.tool === 'Bash' ? failedRun($, e) : READ_RESULT))
+    on('tool.run', (_, e) => (e.tool === 'Bash' ? FAILED : READ_RESULT))
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     await $.tool.call({ tool: 'Read', file_path: '/proj/src/a.ts' })

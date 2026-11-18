@@ -59,6 +59,7 @@ import {
   TODO_TOOLS,
   toolName,
   withAsking,
+  withAskWithdrawn,
   withFailure,
   withFileUses,
   withNewTurn,
@@ -526,27 +527,31 @@ let isTicking = false
 /** Numbers the main loop's tool calls that come without a tool_use_id. */
 let calls = 0
 
-// A permission dialog names no call (its PermissionRequest carries none), so
-// the calls that reach the permission check wait here, oldest first, with
-// their input, until a PermissionRequest takes one or the call ends. What a
-// call met on its way is kept by its tool_use_id until its tool.call ends:
-// the check reached, a dialog or the auto-mode check's refusal, its tool
-// having run (or failed as it ran), how long it ran. The permission hooks
-// pass their events on unread, so a call that reached the check and came
-// back errored with its tool never run was refused there (by a rule, the
-// mode or a PreToolUse hook). Each is this module's: a reload drops them,
-// and an ask then falls back to its tool and loop.
-let checkedAsks: (Ask & { input: string })[] = []
+// What a call meets on its way, kept by its tool_use_id until its tool.call
+// ends. Its permission check's verdict (tool.check): an `ask` is put to the
+// mode's decider, a person's dialog unless auto mode's classifier is asked
+// about the call (tool.judge). The call allowed and about
+// to run (tool.run): a dialog raised for it ends there. A call that reached
+// the check and came back errored without having run was refused there (by
+// a rule, the mode, a hook, the person, the classifier); one that ran and
+// came back errored failed in its tool, unless its run was interrupted. None of these events
+// is one Claude Code's built-in guard sends past a person's plugins, as it
+// does the classic permission and tool events. Each set is this module's: a
+// reload drops them, and an ask then ends with its call.
+/** The calls in flight, any loop: a verdict that comes in for one that has ended opens nothing. */
+const openCalls = new Set<string>()
+/** Calls that reached the permission check. */
 const checkedCalls = new Set<string>()
-const permissionCalls = new Set<string>()
-const failedCalls = new Map<string, 'error' | 'interrupt'>()
-/** Calls whose tool ran: a PostToolUse or PostToolUseFailure was heard. */
+/** Calls with a dialog taken to stand: the check said `ask`, and no classifier was asked. */
+const askedCalls = new Set<string>()
+/** Calls auto mode's classifier was asked about: their ask is no person's. */
+const judgedCalls = new Set<string>()
+/** Calls that were allowed and began to run. */
 const ranCalls = new Set<string>()
-/** How long each call's tool ran (PostToolUse's duration_ms: no dialog, no hook time), any loop. */
-const ranMs = new Map<string, number>()
+/** Calls whose run was interrupted (its dispatch aborted under it): an error that is no failure of the tool's. */
+const interruptedCalls = new Set<string>()
 /** Subagents with a dialog open: only their calls need to look for one to end. */
 const agentsAsking = new Set<string>()
-
 /**
  * Whether the main loop's window had a fill when last looked at, or has one
  * since by a response of its own. This module's: a reload drops it, and the
@@ -622,15 +627,6 @@ function takeSpawn(at: number, pick: (waiting: readonly PendingSpawn[]) => Pendi
   const spawn = pick(waitingSpawns(at))
   pendingSpawns = pendingSpawns.filter(one => one !== spawn)
   return spawn
-}
-
-/** A tool input as a key two events of one call share. */
-function inputKey(input: unknown): string {
-  try {
-    return JSON.stringify(input) ?? ''
-  } catch {
-    return ''
-  }
 }
 
 /** The open dialog a call ends: its own, else one of its tool and loop no check named. */
@@ -868,31 +864,25 @@ function noteSpawn($: EngineInterface, spawned: Frozen<Args<'agent.spawn'>>): Pr
   })
 }
 
-/** A call that reached the permission check waits in checkedAsks for a PermissionRequest. */
-function noteCheck(check: Frozen<Args<'tool.check'>>): void {
+/**
+ * A call's permission check has its verdict. An `ask` opens the dialog's
+ * cue: the mascot asks from here until the call is allowed (tool.run) or
+ * ends. Not where auto mode's classifier was already asked about the call,
+ * or for a call no longer in flight.
+ */
+function noteVerdict($: EngineInterface, check: Frozen<Args<'tool.check'>>, decision: string): Promise<void> {
   const id = check.tool_use_id
-  if (id !== undefined) {
-    checkedCalls.add(id)
-    const checked = { id, tool: check.tool, agentId: check.agentId ?? null, input: inputKey(check.input) }
-    checkedAsks = [...checkedAsks.filter(ask => ask.id !== id), checked].slice(-20)
-  }
-}
-
-/** A dialog opening: the mascot asks from the start, until its call ends. */
-function noteRequest($: EngineInterface, request: Frozen<Args<'classic.PermissionRequest'>>): Promise<void> {
-  // Its call: the checked ask of this tool and loop with the same input,
-  // else the oldest (an ask the auto-mode check settled opens no dialog).
-  const loop = request.agent_id ?? null
-  const input = inputKey(request.tool_input)
-  const candidates = checkedAsks.filter(ask => ask.tool === request.tool_name && ask.agentId === loop)
-  const checked = candidates.find(ask => ask.input === input) ?? candidates[0]
-  checkedAsks = checkedAsks.filter(ask => ask !== checked)
-  const asked: Ask = { id: checked?.id ?? null, tool: request.tool_name, agentId: loop }
-  if (asked.id !== null) permissionCalls.add(asked.id)
-  if (loop !== null) agentsAsking.add(loop)
+  // A query (`$.tool.check`) decides about no call.
+  if (id === undefined) return Promise.resolve()
+  checkedCalls.add(id)
+  if (decision !== 'ask' || !openCalls.has(id) || judgedCalls.has(id) || ranCalls.has(id)) return Promise.resolve()
+  const asked: Ask = { id, tool: check.tool, agentId: check.agentId ?? null }
+  askedCalls.add(id)
+  if (asked.agentId !== null) agentsAsking.add(asked.agentId)
   return quietly(async () => {
     const at = await $.clock.now()
     await update($, cues, state => {
+      if (state.asking.some(ask => ask.id === id)) return state
       const opened = withAsking(state, [...state.asking, asked].slice(-20), at)
       return isApproval(asked) ? { ...opened, approvals: opened.approvals + 1 } : opened
     })
@@ -900,10 +890,25 @@ function noteRequest($: EngineInterface, request: Frozen<Args<'classic.Permissio
   })
 }
 
-/** A call the auto-mode check refused leaves the checked asks, counted as decided. */
-function noteDenied(denied: Frozen<Args<'classic.PermissionDenied'>>): void {
-  checkedAsks = checkedAsks.filter(ask => ask.id !== denied.tool_use_id)
-  permissionCalls.add(denied.tool_use_id)
+/** Auto mode's classifier is asked about a call: its ask is no person's, so the cue it opened is taken back, uncounted. */
+function noteJudged($: EngineInterface, judged: Frozen<Args<'tool.judge'>>): Promise<void> {
+  const id = judged.tool_use_id
+  judgedCalls.add(id)
+  if (!askedCalls.delete(id)) return Promise.resolve()
+  return quietly(() => update($, cues, state => withAskWithdrawn(state, id)))
+}
+
+/** A call was allowed and is about to run: a dialog raised for it ends now, the wait for it with it. */
+function noteAllowed($: EngineInterface, id: string): Promise<void> {
+  ranCalls.add(id)
+  if (!askedCalls.delete(id)) return Promise.resolve()
+  return quietly(async () => {
+    const at = await $.clock.now()
+    await update($, cues, state => {
+      const asked = state.asking.findIndex(ask => ask.id === id)
+      return asked < 0 ? state : withAsking(state, withoutAsk(state.asking, asked), at)
+    })
+  })
 }
 
 export const register: Register = (on, options) => {
@@ -993,6 +998,7 @@ export const register: Register = (on, options) => {
     // While it runs, a main-loop call decides what the mascot does.
     const isMain = e.agentId === undefined
     const call = { id: e.tool_use_id ?? `call-${(calls += 1)}`, kind: toolKindOf(e.tool) }
+    openCalls.add(call.id)
     if (isMain) await quietly(() => update($, cues, state => ({ ...state, running: [...state.running, call].slice(-20) })))
 
     // A subagent's call is its latest activity: the tool and the file's name,
@@ -1006,28 +1012,28 @@ export const register: Register = (on, options) => {
       })
     }
 
-    // What the call met on its way: an open dialog as it ended, a permission
-    // decision, the tool failing as it ran.
+    // What the call met on its way: a dialog still open as it ended, a
+    // refusal at its check, the tool failing as it ran.
     let wasAsked = false
     let wasDecided = false
-    let failure: 'error' | 'interrupt' | undefined
+    let wasInterrupted = false
     let reply: Awaited<ReturnType<typeof next>> | undefined
     try {
       reply = await next(e)
     } finally {
-      failure = failedCalls.get(call.id)
-      failedCalls.delete(call.id)
+      openCalls.delete(call.id)
+      wasInterrupted = interruptedCalls.delete(call.id)
+      const hasRun = ranCalls.has(call.id)
       await quietly(async () => {
-        // The call is over, and with it a permission dialog raised for it.
-        checkedAsks = checkedAsks.filter(ask => ask.id !== call.id)
+        // The call is over, and with it a permission dialog still open for it.
         if (!isMain && !(e.agentId !== undefined && agentsAsking.has(e.agentId))) return
-        // A tool that ran after its dialog ends later than the answer: the wait
-        // ends its run time before the call's end, and is approximate (hook time
-        // stays in it). A call that failed as it ran or was interrupted ran too;
-        // one that threw is not known to have waited only.
-        const hasRun = failure !== undefined || reply === undefined || (reply.deny === undefined && reply.isError !== true)
-        const ran = ranMs.get(call.id)
-        const at = (await $.clock.now()) - (hasRun && ran !== undefined ? ran : 0)
+        const at = await $.clock.now()
+        // A dialog ends when its call is allowed (tool.run), so one open now
+        // was refused, and the call's end is the answer's time. Only where a
+        // call came back with a result and was never heard to start did its
+        // tool run after the dialog: the wait is then approximate, the tool's
+        // run in it (a tool that ends at its answer leaves nothing to add).
+        const isRunUnheard = !hasRun && reply !== undefined && reply.deny === undefined && reply.isError !== true
         // Decided inside the update, which runs again on the newer value: a
         // read after next(e), in a hook that touched state before it, can be stale.
         await update($, cues, state => {
@@ -1035,24 +1041,25 @@ export const register: Register = (on, options) => {
           wasAsked = asked >= 0
           if (!isMain && asked < 0) return state
           const ask = state.asking[asked]
-          const isApprox = ask !== undefined && isApproval(ask) && hasRun && !ENDS_AT_ANSWER.has(e.tool)
+          const isApprox = ask !== undefined && isApproval(ask) && isRunUnheard && !ENDS_AT_ANSWER.has(e.tool)
           const running = state.running.filter(one => one.id !== call.id)
           return withAsking({ ...state, running }, withoutAsk(state.asking, asked), at, isApprox)
         })
       })
-      wasDecided = permissionCalls.delete(call.id) || (checkedCalls.has(call.id) && !ranCalls.has(call.id))
+      wasDecided = checkedCalls.has(call.id) && !hasRun
       checkedCalls.delete(call.id)
+      askedCalls.delete(call.id)
+      judgedCalls.delete(call.id)
       ranCalls.delete(call.id)
-      ranMs.delete(call.id)
-    }
-    const answer = reply as Awaited<ReturnType<typeof next>>
-    // A call refused at a dialog, at the check (a rule, the mode, a PreToolUse
-    // hook) or by the auto-mode check comes back errored too; only one the
-    // tool failed in as it ran (a Bash command's exit code other than 0 among
-    // them), or that failed with no permission decision on its way (its input
-    // refused before the check), is a failure: it startles the mascot and
-    // counts on RADAR.
-    const isScare = answer.isError === true && (failure === 'error' || (failure === undefined && !wasAsked && !wasDecided))
+    }    const answer = reply as Awaited<ReturnType<typeof next>>
+    // A call refused at a dialog, at the check (a rule, the mode, a hook) or
+    // by auto mode's classifier comes back errored too, and so does one the
+    // person interrupted; only one that was allowed and came back errored
+    // from its run (a Bash command's exit code other than 0 among them), or
+    // that failed with no permission decision on its way (its input refused
+    // before the check), is a failure: it startles the mascot and counts on
+    // RADAR.
+    const isScare = answer.isError === true && !wasInterrupted && !wasAsked && !wasDecided
 
     if (e.agentId !== undefined) {
       const id = e.agentId
@@ -1167,47 +1174,34 @@ export const register: Register = (on, options) => {
     return spawnPassOn(spawnEvent)
   })
 
-  // A call that reaches the permission check: a PermissionRequest may take
-  // it for its dialog. The verdict passes on unread.
-  on('tool.check', (checkHost, checkEvent, checkPassOn) => {
-    noteCheck(checkEvent)
-    return checkPassOn(checkEvent)
+  // A call's permission check: its verdict is read, to tell a dialog by
+  // (noteVerdict), and handed back as it came, the very object.
+  on('tool.check', async (checkHost, checkEvent, checkPassOn) => {
+    const decided = await checkPassOn(checkEvent)
+    await noteVerdict(checkHost, checkEvent, decided.decision)
+    return decided
   })
 
-  // A call a PreToolUse hook may refuse has reached the check too.
-  on('classic.PreToolUse', (preToolHost, preToolEvent, preToolPassOn) => {
-    checkedCalls.add(preToolEvent.tool_use_id)
-    return preToolPassOn(preToolEvent)
+  // Auto mode's classifier is about to be asked about a call: no person's
+  // dialog. The event passes on unchanged, its answer unread.
+  on('tool.judge', async (judgeHost, judgeEvent, judgePassOn) => {
+    await noteJudged(judgeHost, judgeEvent)
+    return judgePassOn(judgeEvent)
   })
 
-  // The dialog shows while the PermissionRequest hooks run, so the mascot
-  // asks from the start, until the call ends; the answer passes on unread.
-  on('classic.PermissionRequest', async (requestHost, requestEvent, requestPassOn) => {
-    await noteRequest(requestHost, requestEvent)
-    return requestPassOn(requestEvent)
+  // A call was allowed and runs: its dialog, if it had one, ends here. A run
+  // whose dispatch was aborted (the person interrupted) is noted, so its
+  // error counts as no failure. The call and its answer pass through as
+  // they came.
+  on('tool.run', async ($, e, next) => {
+    const id = e.tool_use_id
+    if (id !== undefined) await noteAllowed($, id)
+    try {
+      return await next(e)
+    } finally {
+      if (id !== undefined && next.signal.aborted) interruptedCalls.add(id)
+    }
   })
-
-  // A call the auto-mode check refused: not a tool error, and no dialog.
-  on('classic.PermissionDenied', (deniedHost, deniedEvent, deniedPassOn) => {
-    noteDenied(deniedEvent)
-    return deniedPassOn(deniedEvent)
-  })
-
-  // A call whose tool ran and failed in it, or was interrupted as it ran, and how long it ran.
-  on('classic.PostToolUseFailure', ($, e, next) => {
-    ranCalls.add(e.tool_use_id)
-    failedCalls.set(e.tool_use_id, e.is_interrupt === true ? 'interrupt' : 'error')
-    if (typeof e.duration_ms === 'number') ranMs.set(e.tool_use_id, e.duration_ms)
-    return next(e)
-  })
-
-  // A call whose tool ran, and how long: the wait for its approval ended that much before the call did.
-  on('classic.PostToolUse', ($, e, next) => {
-    ranCalls.add(e.tool_use_id)
-    if (typeof e.duration_ms === 'number') ranMs.set(e.tool_use_id, e.duration_ms)
-    return next(e)
-  })
-
   // Every model request's tokens, read once its response is whole: the
   // stream passes through unread, and its result goes back as it came, its
   // model and effort never rewritten. A request is counted by its loop (the
@@ -1382,12 +1376,12 @@ export const register: Register = (on, options) => {
         await update($, agentFolds, () => NO_FOLDS)
         await update($, agentsLeft, () => [])
         boardKey = ''
-        checkedAsks = []
+        openCalls.clear()
         checkedCalls.clear()
-        permissionCalls.clear()
-        failedCalls.clear()
+        askedCalls.clear()
+        judgedCalls.clear()
+        interruptedCalls.clear()
         ranCalls.clear()
-        ranMs.clear()
         agentsAsking.clear()
         pendingSpawns = []
         hadFill = false

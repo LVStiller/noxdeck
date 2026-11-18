@@ -217,7 +217,7 @@ export function engine(on: On, world: World = {}) {
   })
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_, e) => ({ text: e.answer }))
-  on('classic.PostToolUseFailure', () => ({}))
+
   on('session.measure', (_, e) => ({ changed: e.changed }))
   on('ui.blit', (_, e) => {
     if ('source' in e) world.blits?.push({ ...e, at: clock.now() })
@@ -392,18 +392,28 @@ export const READ_RESULT = { result: { type: 'text', file: { filePath: '/proj/a.
 export const MINUTE = 60_000
 export const HOUR = 60 * MINUTE
 export const ANSWERED = { answer: '', isAborted: false, reason: 'answer' } as const
-const FAILED = { isError: true, result: 'exit 1', text: 'exit 1' } as const
 export const BASH_OK = { result: { stdout: '', stderr: '', interrupted: false } } as const
 
-/**
- * Answers a call as a tool that ran and failed, as the engine reports one:
- * its PostToolUseFailure first (a call refused before its tool ran has
- * none), then the errored result.
- */
-export async function failedRun($: Engine, e: { tool: string; tool_use_id?: string }) {
-  await $.classic.PostToolUseFailure({ tool_name: e.tool, tool_input: {}, tool_use_id: e.tool_use_id ?? '', error: 'exit 1' })
-  return FAILED
-}
+// A tool call's way beneath the plugins is the kit's own core, in the
+// engine's order: classic.PreToolUse, tool.check, for an `ask` the dialog
+// (classic.PermissionRequest), then tool.run for a call that was allowed. A
+// test stands for what is beneath that: `tool.check`'s bottom hook is the
+// engine's verdict, `classic.PermissionRequest`'s the person at the dialog
+// (ALLOWED once they say yes; `{}`, with nobody the kit could ask, is a
+// no), `tool.run`'s the tool itself. noxdeck hooks tool.check, tool.judge
+// and tool.run, and no classic event.
+//
+// Invented: that tool.run reaches a plugin for every call that was allowed,
+// and what its answer looks like for a tool that failed (FAILED), is the
+// types' and this kit's (Claude Code 2.1.327); no live session has been
+// recorded with it yet. The same holds for every tool.judge a test raises.
+
+/** The dialog's answer once the person, or a settings hook, allows the call. */
+export const ALLOWED = { decision: { behavior: 'allow' } } as const
+/** The verdict that puts a call to the person. */
+export const ASK = { decision: 'ask' } as const
+/** A run's answer as the engine reports a tool that failed as it ran (a Bash command's exit code 1). */
+export const FAILED = { isError: true, result: 'exit 1', text: 'exit 1' } as const
 
 /** The pane's texts on the terminal at `bodyRows` rows (and `bodyColumns` columns). */
 export async function textsAt($: Engine, bodyRows = 80, bodyColumns = 48): Promise<Found[]> {

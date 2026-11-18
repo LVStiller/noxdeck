@@ -78,7 +78,7 @@ In `/config`, each under `noxdeck.<name>`, or when installing in a shell with `-
 `claude plugin validate .` reads the hooks module the way Claude Code loads it and prints every event it hooks and every call it makes on `$`. For noxdeck 1.1.2:
 
 ```
-hooks: session.start, command.run{command=noxdeck}, ui.close{id=noxdeck}, tool.call, agent.spawn, tool.check, classic.PreToolUse, classic.PermissionRequest, classic.PermissionDenied, classic.PostToolUseFailure, classic.PostToolUse, turn.step, turn.start, turn.complete, session.measure, session.end, ui.render{component=Pane, requestId=noxdeck} (default matcher key: plugin), ui.render{component=SessionMode}
+hooks: session.start, command.run{command=noxdeck}, ui.close{id=noxdeck}, tool.call, agent.spawn, tool.check, tool.judge, tool.run, turn.step, turn.start, turn.complete, session.measure, session.end, ui.render{component=Pane, requestId=noxdeck} (default matcher key: plugin), ui.render{component=SessionMode}
 calls: $.agent.list, $.clock.after, $.clock.every (via ensureTicker), $.clock.now, $.command.register, $.session.id (via restoreCount), $.session.root (via refreshRoot), $.session.usage (via lookForCompaction, refreshContext), $.settings.read (via readMotion), $.state.get, $.state.set, $.store.delete (via tidyCounts), $.store.get (via restoreCount, tidyCounts), $.store.keys (via tidyCounts), $.store.set (via countCompaction, restoreCount), $.tool.list (via refreshTodoTools), $.ui.blit (via blit), $.ui.open (via openPane), $.ui.panes (via isPaneOpen, isPaneShown), $.ui.resolve, $.ui.toast, $.ui.view (via showView)
 ```
 
@@ -95,12 +95,9 @@ No network, no prompt logging, one small entry on disk: noxdeck makes no network
 | `ui.close{id=noxdeck}` | Its own pane closing. | Nothing; it remembers that you closed it, so the pane does not open by itself again. |
 | `tool.call` | Every tool call and its result: the tool, a file's name, the lines a change added and removed, whether it failed, Claude's todo list, a workflow run's name and id. | Nothing: the call and its result pass unchanged. |
 | `agent.spawn` | A subagent starting: its description, its type, whether a workflow started it and which run (its prompt only as a hash and a length, to tell its first turn by). | Nothing: `return next(e)`, the answer unread. |
-| `tool.check` | That a call reached the permission check. | Nothing: `return next(e)`, the verdict unread. |
-| `classic.PreToolUse` | That a call reached the PreToolUse hooks. | Nothing: `return next(e)`. |
-| `classic.PermissionRequest` | A permission dialog opening: Nox shows a ? until the call ends. | Nothing: `return next(e)`, the answer unread. |
-| `classic.PermissionDenied` | The auto-mode check refusing a call, so RADAR does not count it as a failure. | Nothing: `return next(e)`. |
-| `classic.PostToolUseFailure` | A tool that failed or was interrupted as it ran, and how long it ran. | Nothing: `return next(e)`. |
-| `classic.PostToolUse` | A tool that ran, and how long it ran. | Nothing: `return next(e)`. |
+| `tool.check` | A call's permission check and its verdict: an `ask` means a dialog is about to open, so Nox shows a ? and the wait for your answer starts. | Nothing: the verdict is read and handed back as it came. |
+| `tool.judge` | That auto mode's classifier is asked about a call: no dialog of yours, so no ? and no approval counted. | Nothing: `return next(e)`, the answer unread. |
+| `tool.run` | A call that was allowed starting to run: its dialog, if it had one, ends here, and the wait with it. | Nothing: the call and its answer pass unchanged. |
 | `turn.step` | Each model request's tokens, once its response is whole; as a request of the main chat begins, whether the context window still has a fill, to count a compaction. | Nothing: every chunk and the result pass through as they came; model and effort are never rewritten. |
 | `turn.start` | A turn starting, the main chat's or a subagent's; as the main chat's starts, whether the context window still has a fill, to count a compaction. | Nothing: the event passes on unchanged. |
 | `turn.complete` | A turn ending: why, how long, its tokens. | Nothing: the event passes on unchanged. |

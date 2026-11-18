@@ -78,7 +78,7 @@ In `/config`, jeweils unter `noxdeck.<name>`, oder bei der Installation in einer
 `claude plugin validate .` liest das Hooks-Modul so, wie Claude Code es lädt, und nennt jedes Ereignis, in das es sich einhängt, und jeden Aufruf, den es auf `$` macht. Für noxdeck 1.1.2:
 
 ```
-hooks: session.start, command.run{command=noxdeck}, ui.close{id=noxdeck}, tool.call, agent.spawn, tool.check, classic.PreToolUse, classic.PermissionRequest, classic.PermissionDenied, classic.PostToolUseFailure, classic.PostToolUse, turn.step, turn.start, turn.complete, session.measure, session.end, ui.render{component=Pane, requestId=noxdeck} (default matcher key: plugin), ui.render{component=SessionMode}
+hooks: session.start, command.run{command=noxdeck}, ui.close{id=noxdeck}, tool.call, agent.spawn, tool.check, tool.judge, tool.run, turn.step, turn.start, turn.complete, session.measure, session.end, ui.render{component=Pane, requestId=noxdeck} (default matcher key: plugin), ui.render{component=SessionMode}
 calls: $.agent.list, $.clock.after, $.clock.every (via ensureTicker), $.clock.now, $.command.register, $.session.id (via restoreCount), $.session.root (via refreshRoot), $.session.usage (via lookForCompaction, refreshContext), $.settings.read (via readMotion), $.state.get, $.state.set, $.store.delete (via tidyCounts), $.store.get (via restoreCount, tidyCounts), $.store.keys (via tidyCounts), $.store.set (via countCompaction, restoreCount), $.tool.list (via refreshTodoTools), $.ui.blit (via blit), $.ui.open (via openPane), $.ui.panes (via isPaneOpen, isPaneShown), $.ui.resolve, $.ui.toast, $.ui.view (via showView)
 ```
 
@@ -95,12 +95,9 @@ Kein Netzwerk, kein Prompt-Logging, ein kleiner Eintrag auf der Platte: noxdeck 
 | `ui.close{id=noxdeck}` | Das Schließen seines eigenen Panes. | Nein; er merkt sich, dass du es geschlossen hast, damit das Pane nicht von selbst wieder aufgeht. |
 | `tool.call` | Jeden Tool-Aufruf und sein Ergebnis: das Tool, den Namen einer Datei, die Zeilen, die eine Änderung hinzugefügt und entfernt hat, ob er fehlgeschlagen ist, Claudes Todo-Liste, Name und Kennung eines Workflow-Laufs. | Nein: Aufruf und Ergebnis gehen unverändert weiter. |
 | `agent.spawn` | Den Start eines Subagents: seine Beschreibung, seinen Typ, ob ein Workflow ihn gestartet hat und in welchem Lauf (seinen Prompt nur als Hash und Länge, um seinen ersten Turn daran zu erkennen). | Nein: `return next(e)`, die Antwort ungelesen. |
-| `tool.check` | Dass ein Aufruf die Berechtigungsprüfung erreicht hat. | Nein: `return next(e)`, das Urteil ungelesen. |
-| `classic.PreToolUse` | Dass ein Aufruf die PreToolUse-Hooks erreicht hat. | Nein: `return next(e)`. |
-| `classic.PermissionRequest` | Das Öffnen eines Berechtigungsdialogs: Nox zeigt ein ?, bis der Aufruf endet. | Nein: `return next(e)`, die Antwort ungelesen. |
-| `classic.PermissionDenied` | Eine Ablehnung durch die Auto-Mode-Prüfung, damit RADAR sie nicht als Fehler zählt. | Nein: `return next(e)`. |
-| `classic.PostToolUseFailure` | Ein Tool, das beim Laufen fehlgeschlagen ist oder unterbrochen wurde, und wie lange es lief. | Nein: `return next(e)`. |
-| `classic.PostToolUse` | Ein Tool, das gelaufen ist, und wie lange. | Nein: `return next(e)`. |
+| `tool.check` | Die Freigabeprüfung eines Aufrufs und ihr Urteil: Bei `ask` öffnet sich gleich ein Dialog, also zeigt Nox ein ? und die Wartezeit auf deine Antwort beginnt. | Nein: Das Urteil wird gelesen und unverändert zurückgegeben. |
+| `tool.judge` | Dass der Klassifikator des Auto-Modus zu einem Aufruf gefragt wird: kein Dialog für dich, also kein ? und keine gezählte Freigabe. | Nein: `return next(e)`, die Antwort ungelesen. |
+| `tool.run` | Dass ein erlaubter Aufruf zu laufen beginnt: Sein Dialog, falls es einen gab, endet hier, und mit ihm die Wartezeit. | Nein: Aufruf und Antwort gehen unverändert durch. |
 | `turn.step` | Die Tokens jeder Modellanfrage, sobald ihre Antwort vollständig ist; zu Beginn einer Anfrage des Haupt-Chats, ob das Kontextfenster noch einen Füllstand hat, um eine Kompaktierung zu zählen. | Nein: Jeder Chunk und das Ergebnis gehen durch, wie sie kamen; Modell und Effort werden nie umgeschrieben. |
 | `turn.start` | Den Start eines Turns, des Haupt-Chats oder eines Subagents; beim Start im Haupt-Chat, ob das Kontextfenster noch einen Füllstand hat, um eine Kompaktierung zu zählen. | Nein: Das Ereignis geht unverändert weiter. |
 | `turn.complete` | Das Ende eines Turns: warum, wie lange, seine Tokens. | Nein: Das Ereignis geht unverändert weiter. |

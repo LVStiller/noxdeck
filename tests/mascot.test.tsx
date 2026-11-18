@@ -21,6 +21,7 @@ import {
 } from '../hooks/mascot'
 import type { Animations, Scene } from '../hooks/mascot'
 import { themeOf } from '../hooks/themes'
+
 import type { Activity, ContextSnapshot, Cues, MiniPose } from '../types'
 import {
   SURFACES,
@@ -52,7 +53,9 @@ import {
   HOUR,
   ANSWERED,
   BASH_OK,
-  failedRun,
+  FAILED,
+  ALLOWED,
+  ASK,
   textsAt,
   has,
 } from './helpers'
@@ -163,43 +166,49 @@ describe('mascot Nox at work', () => {
 })
 
 describe('mascot Nox on events', () => {
-  test('a permission question is open: a bobbing ?, caption „braucht deine Freigabe“, until its call ends', async ($, on) => {
+  test('a permission question is open: a bobbing ?, caption „braucht deine Freigabe“, until its call is allowed', async ($, on) => {
     const clock = engine(on)
     const outer = $
     let asking = new Set<string>()
+    let running = new Set<string>()
     let caption: string | undefined
-    // No settings hook decides: the dialog is the person's.
-    on('classic.PermissionRequest', () => ({}))
-    on('tool.call', async () => {
-      await outer.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'rm -rf build' } })
+    // The check puts the call to the person; the dialog stands until they allow it.
+    on('tool.check', () => ASK)
+    on('classic.PermissionRequest', async () => {
       asking = await posesOver(outer, clock, 1500)
       const ui = await outer.ui.mount({ ...PANE, surface: 'terminal' })
       caption = (await captionOf(ui))?.text
       await ui.unmount()
-      return { result: { stdout: '', stderr: '', interrupted: false } }
+      return ALLOWED
     })
-    await start($)
-    await $.turn.start({ text: '', turnId: 't1' })
-    await $.tool.call({ tool: 'Bash', command: 'rm -rf build' })
-    expect([...asking].sort()).toEqual(['question', 'questionLow'])
-    expect(caption).toBe('braucht deine Freigabe')
-    expect(framesIn(await posesOver($, clock, 1500))).not.toContain('question')
-  })
-
-  test('a question a settings hook answered: its answer passes unread, so the ? stands until its call ends', async ($, on) => {
-    const clock = engine(on)
-    const outer = $
-    let asking = new Set<string>()
-    on('classic.PermissionRequest', () => ({ decision: { behavior: 'allow' } }))
-    on('tool.call', async () => {
-      await outer.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'ls' } })
-      asking = await posesOver(outer, clock, 1500)
+    // Allowed, the command runs a while: the question is over, though the call is not.
+    on('tool.run', async () => {
+      running = await posesOver(outer, clock, 1500)
       return BASH_OK
     })
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
-    await $.tool.call({ tool: 'Bash', command: 'ls' })
+    await $.tool.call({ tool: 'Bash', command: 'rm -rf build', tool_use_id: 'tu-1' })
     expect([...asking].sort()).toEqual(['question', 'questionLow'])
+    expect(caption).toBe('braucht deine Freigabe')
+    expect(framesIn(running)).not.toContain('question')
+    expect(framesIn(await posesOver($, clock, 1500))).not.toContain('question')
+  })
+
+  test('a question a settings hook answered at once: the call is allowed and runs, no ? stands while it does', async ($, on) => {
+    const clock = engine(on)
+    const outer = $
+    let running = new Set<string>()
+    on('tool.check', () => ASK)
+    on('classic.PermissionRequest', () => ALLOWED)
+    on('tool.run', async () => {
+      running = await posesOver(outer, clock, 1500)
+      return BASH_OK
+    })
+    await start($)
+    await $.turn.start({ text: '', turnId: 't1' })
+    await $.tool.call({ tool: 'Bash', command: 'ls', tool_use_id: 'tu-1' })
+    expect(framesIn(running)).not.toContain('question')
     expect(framesIn(await posesOver($, clock, 1500))).not.toContain('question')
   })
 
@@ -229,7 +238,7 @@ describe('mascot Nox on events', () => {
 
   test('a tool fails: it jolts up with a drop of sweat, lands, and goes back to work', async ($, on) => {
     const clock = engine(on)
-    on('tool.call', (_, e) => failedRun($, e))
+    on('tool.run', (_, e) => FAILED)
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     await $.tool.call({ tool: 'Bash', command: 'false' })
@@ -240,35 +249,36 @@ describe('mascot Nox on events', () => {
     expect(frameOfLabel(await shownPose($))).toMatch(/^think/)
   })
 
-  test('a slow hook beneath that answers after the call ended leaves no ?, main loop or subagent', async ($, on) => {
+  test('a verdict that comes in for a call no longer in flight opens no ?, main loop or subagent', async ($, on) => {
     const clock = engine(on)
-    const outer = $
-    const releases: ((answer: object) => void)[] = []
-    on('classic.PermissionRequest', () => new Promise(resolve => releases.push(resolve)))
-    on('tool.call', async (_, e) => {
-      // The dialog opens, the person answers, the call runs and ends: the hook beneath is still busy.
-      void outer.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'ls' }, ...(e.agentId ? { agent_id: e.agentId } : {}) })
-      await clock.advance(0)
-      return { result: { stdout: '', stderr: '', interrupted: false } }
-    })
+    on('tool.check', () => ASK)
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
-    await $.tool.call({ tool: 'Bash', command: 'ls' })
-    await $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'a1' })
-    for (const release of releases) release({})
-    await clock.advance(0)
+    // Invented: a check that settles after its call was given up (an interrupt); no call of these ids is in flight.
+    await $.tool.check({ tool: 'Bash', input: { command: 'ls' }, tool_use_id: 'tu-gone' } as never)
+    await $.tool.check({ tool: 'Bash', input: { command: 'ls' }, tool_use_id: 'tu-gone-2', agentId: 'a1' } as never)
     expect(framesIn(await posesOver($, clock, 1500))).not.toContain('question')
   })
 
-  test('an ask that comes in after its subagent call ended goes with that agent\'s turn', async ($, on) => {
+  test('a subagent\'s dialog still open when its turn ends goes with that turn', async ($, on) => {
     const clock = engine(on)
-    on('classic.PermissionRequest', () => ({}))
+    let answer!: () => void
+    const answered = new Promise<void>(resolve => {
+      answer = resolve
+    })
+    on('tool.check', () => ASK)
+    on('classic.PermissionRequest', async () => {
+      await answered
+      return {}
+    })
     await start($)
     await $.turn.start({ text: '', turnId: 'x', agentId: 'a1' })
-    await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'ls' }, agent_id: 'a1' })
+    const call = $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'a1', tool_use_id: 'tu-a' })
     expect(framesIn(await posesOver($, clock, 500))).toContain('question')
     await $.turn.complete({ turnId: 'x', agentId: 'a1', answer: '', durationMs: 1, isAborted: false, reason: 'answer' })
     expect(framesIn(await posesOver($, clock, 1000))).not.toContain('question')
+    answer()
+    await call
   })
 
   test('two calls of one tool in parallel: the one that ends leaves the other\'s ? standing', async ($, on) => {
@@ -277,17 +287,17 @@ describe('mascot Nox on events', () => {
     const released = new Promise<void>(resolve => {
       release = resolve
     })
-    // tool.check puts a.ts to a dialog and lets b.ts run; a hook answers the dialog once released.
+    // tool.check puts a.ts to a dialog and lets b.ts run; the dialog is answered once released.
     on('tool.check', (_, e) => ({ decision: (e.input as { file_path?: string }).file_path === '/proj/a.ts' ? 'ask' : 'allow' }))
     on('classic.PermissionRequest', async () => {
       await released
-      return { decision: { behavior: 'allow' } }
+      return ALLOWED
     })
-    on('tool.call', () => READ_RESULT)
+    on('tool.run', () => READ_RESULT)
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
-    const asked = $.tool.call({ tool: 'Read', file_path: '/proj/a.ts' })
-    await $.tool.call({ tool: 'Read', file_path: '/proj/b.ts' })
+    const asked = $.tool.call({ tool: 'Read', file_path: '/proj/a.ts', tool_use_id: 'tu-a' })
+    await $.tool.call({ tool: 'Read', file_path: '/proj/b.ts', tool_use_id: 'tu-b' })
     expect([...(await posesOver($, clock, 1000))].sort()).toEqual(['question', 'questionLow'])
     release()
     await asked
@@ -296,70 +306,45 @@ describe('mascot Nox on events', () => {
 
   test('a refusal is no tool error: no scare when the person says no or a hook denies', async ($, on) => {
     const clock = engine(on)
-    const outer = $
-    on('tool.check', (_, e) => ({ decision: (e.input as { command?: string }).command === 'hook says no' ? 'ask' : 'allow' }))
+    on('tool.check', () => ASK)
+    // The person says no (the kit, with nobody to ask, refuses); for the other command a settings hook denies.
     on('classic.PermissionRequest', (_, e) =>
-      (e.tool_input as { command?: string }).command === 'hook says no' ? { decision: { behavior: 'deny' } } : {},
+      ((e.tool_input as { command?: string }).command === 'hook says no' ? { decision: { behavior: 'deny' } } : {}) as never,
     )
-    on('tool.call', async (_, e) => {
-      // The person answers no: the dialog was open as the call came back errored.
-      await outer.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: (e as { command?: string }).command } })
-      return { isError: true, result: 'refused', text: 'The user refused.' }
-    })
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
-    await $.tool.call({ tool: 'Bash', command: 'person says no', tool_use_id: 'tu-person' })
+    // Refused, the call comes back errored, its tool never run.
+    expect((await $.tool.call({ tool: 'Bash', command: 'person says no', tool_use_id: 'tu-person' })).isError).toBe(true)
     expect(framesIn(await posesOver($, clock, 1000))).not.toContain('startled')
-    await $.tool.call({ tool: 'Bash', command: 'hook says no', tool_use_id: 'tu-hook' })
+    expect((await $.tool.call({ tool: 'Bash', command: 'hook says no', tool_use_id: 'tu-hook' })).isError).toBe(true)
     expect(framesIn(await posesOver($, clock, 1000))).not.toContain('startled')
   })
 
-  test('a call allowed at the dialog that then fails as it runs startles it; an interrupted one does not', async ($, on) => {
+  test('a call allowed at the dialog that then fails as it runs startles it', async ($, on) => {
     const clock = engine(on)
-    const outer = $
-    on('classic.PermissionRequest', () => ({}))
-    on('tool.call', async (_, e) => {
-      const command = (e as { command?: string }).command ?? ''
-      await outer.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command } })
-      await outer.classic.PostToolUseFailure({
-        tool_name: 'Bash',
-        tool_input: { command },
-        tool_use_id: e.tool_use_id ?? '',
-        error: 'exit 1',
-        ...(command === 'sleep 99' ? { is_interrupt: true } : {}),
-      })
-      return { isError: true, result: 'exit 1', text: 'exit 1' }
-    })
+    on('tool.check', () => ASK)
+    on('classic.PermissionRequest', () => ALLOWED)
+    on('tool.run', () => FAILED)
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     await $.tool.call({ tool: 'Bash', command: 'false', tool_use_id: 'tu-false' })
     expect(framesIn(await posesOver($, clock, 1000))).toContain('startled')
-    await clock.advance(STARTLE_MS)
-    await $.tool.call({ tool: 'Bash', command: 'sleep 99', tool_use_id: 'tu-sleep' })
-    expect(framesIn(await posesOver($, clock, 1000))).not.toContain('startled')
+    // Not shown here: a run the person interrupted, whose error is no failure. noxdeck tells it by the
+    // run's dispatch being aborted (`next.signal`, the types'), which the kit cannot do to a call.
   })
 
-  test('a deny by a rule or a PreToolUse hook is no tool error either', async ($, on) => {
+  test('a deny by a rule is no tool error either: the call reached its check and never ran', async ($, on) => {
     const clock = engine(on)
     on('tool.check', (_, e) =>
       (e.input as { command?: string }).command === 'rm -rf build' ? { decision: 'deny', reason: 'Bash(rm:*) is denied' } : { decision: 'allow' },
     )
-    on('classic.PreToolUse', (_, e) => ((e as { command?: string }).command === 'curl evil' ? { deny: 'blocked by policy' } : {}))
-    // Refused at the check, a call comes back errored with its tool never run (no
-    // PostToolUseFailure); a tool that ran and failed has one.
-    on('tool.call', (_, e) => {
-      const command = (e as { command?: string }).command
-      return command === 'rm -rf build' || command === 'curl evil' ? { isError: true, result: 'denied', text: 'denied' } : failedRun($, e)
-    })
+    on('tool.run', () => FAILED)
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     const ruled = await $.tool.call({ tool: 'Bash', command: 'rm -rf build', tool_use_id: 'tu-rule' })
     expect(ruled.isError).toBe(true)
     expect(framesIn(await posesOver($, clock, 1000))).not.toContain('startled')
-    const hooked = await $.tool.call({ tool: 'Bash', command: 'curl evil', tool_use_id: 'tu-hook' })
-    expect(hooked.isError).toBe(true)
-    expect(framesIn(await posesOver($, clock, 1000))).not.toContain('startled')
-    // A plain failure with nothing of the kind on its way still startles.
+    // A plain failure, allowed at its check and failing as it runs, still startles.
     await $.tool.call({ tool: 'Bash', command: 'false', tool_use_id: 'tu-false' })
     expect(framesIn(await posesOver($, clock, 1000))).toContain('startled')
   })
@@ -367,29 +352,28 @@ describe('mascot Nox on events', () => {
   test('a subagent\'s Edit ends its own dialog', async ($, on) => {
     const clock = engine(on)
     const outer = $
-    on('classic.PermissionRequest', () => ({}))
-    on('tool.call', async (_, e) => {
-      await outer.classic.PermissionRequest({ tool_name: 'Edit', tool_input: { file_path: '/proj/a.ts' }, agent_id: e.agentId ?? '' })
-      return { result: { filePath: '/proj/a.ts', structuredPatch: [], originalFile: '' } }
+    let asking = new Set<string>()
+    on('tool.check', () => ASK)
+    on('classic.PermissionRequest', async () => {
+      asking = await posesOver(outer, clock, 500)
+      return ALLOWED
     })
+    on('tool.run', () => ({ result: { filePath: '/proj/a.ts', structuredPatch: [], originalFile: '' } }))
     await start($)
     await $.turn.start({ text: '', turnId: 'x', agentId: 'a1' })
-    await $.tool.call({ tool: 'Edit', file_path: '/proj/a.ts', old_string: 'a', new_string: 'b', agentId: 'a1' })
+    await $.tool.call({ tool: 'Edit', file_path: '/proj/a.ts', old_string: 'a', new_string: 'b', agentId: 'a1', tool_use_id: 'tu-e' })
+    expect(framesIn(asking)).toContain('question')
     expect(framesIn(await posesOver($, clock, 1000))).not.toContain('question')
   })
 
-  test('an ask the auto-mode check settled opens no dialog: a parallel dialog keeps its ?, and its refusal does not startle', async ($, on) => {
+  test('an ask auto mode\'s classifier settles is no dialog and no approval: a parallel dialog keeps its ?, and its refusal does not startle', async ($, on) => {
     const clock = engine(on)
     const outer = $
-    // Every call runs; inside, the test replays the engine's own check (an ask) for its tool_use_id.
-    let isReplay = false
-    on('tool.check', () => ({ decision: isReplay ? 'ask' : 'allow' }))
-    const replayAsk = async (id: string, url: string) => {
-      isReplay = true
-      await outer.tool.check({ tool: 'WebFetch', input: { url, prompt: 'p' }, tool_use_id: id } as never)
-      isReplay = false
-    }
-    on('classic.PermissionRequest', () => ({}))
+    on('tool.check', () => ASK)
+    // Invented: auto mode asking its classifier about a call (tool.judge, its input the types'); no
+    // session in auto mode has been recorded. The kit has no auto mode, so the test raises the event
+    // where the engine would, after the check and in place of a dialog.
+    on('tool.judge', () => ({ decision: 'allow' as const }))
     let finishA!: () => void
     const aDone = new Promise<void>(resolve => {
       finishA = resolve
@@ -398,23 +382,29 @@ describe('mascot Nox on events', () => {
     const bAnswered = new Promise<void>(resolve => {
       answerB = resolve
     })
-    on('tool.call', async (_, e) => {
-      const url = (e as { url?: string }).url ?? ''
-      await replayAsk(e.tool_use_id ?? '', url)
+    on('classic.PermissionRequest', async (_, e) => {
+      const url = (e.tool_input as { url: string }).url
       if (url.endsWith('/a')) {
-        // A: the auto-mode check allows it, no dialog; the fetch runs a while.
-        await aDone
-        return { result: { bytes: 1, code: 200, codeText: 'OK', result: 'a', durationMs: 1, url } }
+        // A: the classifier allows it, no dialog.
+        await outer.tool.judge({ tool: 'WebFetch', input: { url, prompt: 'p' }, tool_use_id: 'tu-A' } as never)
+        return ALLOWED
       }
-      // B: a dialog opens; the person says no.
-      void outer.classic.PermissionRequest({ tool_name: 'WebFetch', tool_input: { url, prompt: 'p' } })
+      // B: a dialog; the person says no.
       await bAnswered
-      return { isError: true, result: 'refused', text: 'The user refused.' }
+      return {}
+    })
+    // A's fetch runs a while.
+    on('tool.run', async (_, e) => {
+      await aDone
+      return { result: { bytes: 1, code: 200, codeText: 'OK', result: 'a', durationMs: 1, url: (e as { url?: string }).url ?? '' } }
     })
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     const a = $.tool.call({ tool: 'WebFetch', url: 'https://x.test/a', prompt: 'p', tool_use_id: 'tu-A' })
     await clock.advance(0)
+    // The classifier has been asked: no ? for A, and nothing counted.
+    expect(framesIn(await posesOver($, clock, 1000))).not.toContain('question')
+    expect(has(await textsAt($), /^Wartezeit /)).toBe(false)
     const b = $.tool.call({ tool: 'WebFetch', url: 'https://x.test/b', prompt: 'p', tool_use_id: 'tu-B' })
     await clock.advance(0)
     finishA()
@@ -423,6 +413,8 @@ describe('mascot Nox on events', () => {
     answerB()
     await b
     expect(framesIn(await posesOver($, clock, 1000))).not.toContain('startled')
+    // One approval, B's: A's was the classifier's.
+    expect(has(await textsAt($), /^Wartezeit .* · 1 Freigabe$/)).toBe(true)
   })
 
   test('a failed turn startles it too', async ($, on) => {
@@ -876,28 +868,28 @@ describe('Mini-Nox: the small owl where the pane is short', () => {
     const outer = $
     let asking = new Set<string>()
     const titles: unknown[] = []
-    on('classic.PermissionRequest', () => ({}))
-    on('tool.call', async () => {
-      await outer.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'rm -rf build' } })
+    on('tool.check', () => ASK)
+    on('classic.PermissionRequest', async () => {
       asking = await posesOver(outer, clock, 12_000, SHORT)
       titles.push(await titleAt(outer, { rows: 26, columns: 45 }), await titleAt(outer, { rows: 26, columns: 40 }))
-      return BASH_OK
+      return ALLOWED
     })
+    on('tool.run', () => BASH_OK)
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
-    await $.tool.call({ tool: 'Bash', command: 'rm -rf build' })
+    await $.tool.call({ tool: 'Bash', command: 'rm -rf build', tool_use_id: 'tu-1' })
     expect([...asking].sort()).toEqual(['mini:blink+ask', 'mini:idle+ask'])
     expect(titles).toEqual([
       { text: 'braucht deine Freigabe', color: 'claude' },
       { text: 'Freigabe!', color: 'claude' },
     ])
-    // Its call over, the accent goes.
+    // Its call allowed and over, the accent goes.
     expect([...(await posesOver($, clock, 1000, SHORT))].some(label => label.includes('+ask'))).toBe(false)
   })
 
   test('a failed call: it jumps, eyes wide, with a drop of sweat, then walks on', async ($, on) => {
     const clock = engine(on)
-    on('tool.call', (_, e) => failedRun($, e))
+    on('tool.run', (_, e) => FAILED)
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     await $.tool.call({ tool: 'Bash', command: 'false' })

@@ -2,7 +2,8 @@ import { describe, expect } from 'claude-code/testing'
 import { callKey, callLabel, hotspotsOf, NO_RADAR, normalizedCommand, resetClockOf, withFailure, withFileUses } from '../hooks/radar'
 import { MASK, maskSecrets } from '../hooks/secrets'
 import { wrappedRows } from '../hooks/view'
-import { SURFACES, test, PANE, engine, start, SPAWN, captionOf, READ_RESULT, MINUTE, ANSWERED, BASH_OK, failedRun, textsAt, has } from './helpers'
+import { SURFACES, test, PANE, engine, start, SPAWN, captionOf, READ_RESULT, MINUTE, ANSWERED, BASH_OK, FAILED, ALLOWED, ASK, textsAt, has } from './helpers'
+import { RUN_UNHEARD } from './guard'
 import type { Found } from './helpers'
 
 /**
@@ -33,7 +34,7 @@ const FAKE = {
 describe('RADAR', () => {
   test('the same call failing three times in a row: a warning in the accent, at the top of STATUS and of RADAR', async ($, on) => {
     engine(on)
-    on('tool.call', (_, e) => (e.tool === 'Bash' && e.command.includes('just') ? failedRun($, e) : READ_RESULT))
+    on('tool.run', (_, e) => (e.tool === 'Bash' && e.command.includes('just') ? FAILED : READ_RESULT))
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     const run = (command = 'just test --all') => $.tool.call({ tool: 'Bash', command, description: 'Run the tests' })
@@ -82,8 +83,8 @@ describe('RADAR', () => {
 
   test('the loose stage: a call that failed four times in one turn, whatever came between, dim in RADAR only', async ($, on) => {
     engine(on)
-    on('tool.call', (_, e) => {
-      if (e.tool === 'Bash') return failedRun($, e)
+    on('tool.run', (_, e) => {
+      if (e.tool === 'Bash') return FAILED
       return { result: { filePath: (e as { file_path?: string }).file_path ?? '', structuredPatch: [], originalFile: 'x' } }
     })
     await start($)
@@ -120,7 +121,7 @@ describe('RADAR', () => {
 
   test('both stages for one call: in a row the warning only; once a success breaks the row, the dim count', async ($, on) => {
     engine(on)
-    on('tool.call', (_, e) => (e.tool === 'Bash' || e.tool === 'Edit' ? failedRun($, e) : READ_RESULT))
+    on('tool.run', (_, e) => (e.tool === 'Bash' || e.tool === 'Edit' ? FAILED : READ_RESULT))
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     for (let i = 0; i < 4; i += 1) await $.tool.call({ tool: 'Bash', command: 'just test' })
@@ -164,7 +165,7 @@ describe('RADAR', () => {
   test('a refusal, an interrupt or a deny is no failure: it neither counts nor carries a run on', async ($, on) => {
     engine(on)
     on('tool.check', (_, e) => (e.tool === 'Bash' && (e.input as { command?: string }).command === 'rm -rf /' ? { decision: 'deny' as const, reason: 'rule' } : { decision: 'allow' as const }))
-    on('tool.call', (_, e) => failedRun($, e))
+    on('tool.run', (_, e) => FAILED)
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     await $.tool.call({ tool: 'Bash', command: 'just test', description: 'Run the tests' })
@@ -178,7 +179,7 @@ describe('RADAR', () => {
 
   test('failures since load: how many, and the last one\'s tool and how long ago; a subagent\'s are its own', { timeoutMs: 15_000 }, async ($, on) => {
     const clock = engine(on)
-    on('tool.call', (_, e) => failedRun($, e))
+    on('tool.run', (_, e) => FAILED)
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     await $.tool.call({ tool: 'Read', file_path: '/proj/a.ts' })
@@ -196,8 +197,8 @@ describe('RADAR', () => {
 
   test('hotspots: the three files read or edited most, by name and count; subagents too, failures and engine forks not', async ($, on) => {
     engine(on, { agents: [{ id: 'agent-1', description: 'look around', type: 'Explore', status: 'running' }] })
-    on('tool.call', (_, e) => {
-      if (e.tool === 'Read' && e.file_path.endsWith('missing.ts')) return failedRun($, e)
+    on('tool.run', (_, e) => {
+      if (e.tool === 'Read' && e.file_path.endsWith('missing.ts')) return FAILED
       if (e.tool === 'Edit') return { result: { filePath: e.file_path, structuredPatch: [], originalFile: 'x' } }
       return READ_RESULT
     })
@@ -220,35 +221,26 @@ describe('RADAR', () => {
   })
 
   // Three and a half minutes of the clock at four frames a second: about 4.9 s here, version 0.17.1 as well, so more than the default 5 s.
-  test('the wait for approvals: summed while a dialog is open, ≈ once a tool ran before its call ended; a question is none', { timeoutMs: 15_000 }, async ($, on) => {
+  test('the wait for approvals: summed while a dialog is open, to the moment its call is allowed; a tool\'s run is no waiting, a question is none', { timeoutMs: 15_000 }, async ($, on) => {
     const clock = engine(on)
     const outer = $
     let during: string | undefined
-    on('classic.PermissionRequest', () => ({}))
-    on('classic.PostToolUse', () => ({}))
-    on('tool.call', async (_, e) => {
-      if (e.tool === 'Bash' && e.command === 'just build') {
-        await outer.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: e.command } })
-        await clock.advance(10_000)
-        // Approved; it runs a minute, and says so: the wait ends that much before the call.
-        await clock.advance(60_000)
-        await outer.classic.PostToolUse({ tool_name: 'Bash', tool_input: {}, tool_response: {}, tool_use_id: e.tool_use_id ?? '', duration_ms: 60_000 })
-        return BASH_OK
-      }
-      if (e.tool === 'ExitPlanMode') {
-        await outer.classic.PermissionRequest({ tool_name: 'ExitPlanMode', tool_input: {} })
-        await clock.advance(20_000)
-        return { result: {} }
-      }
-      if (e.tool === 'AskUserQuestion') {
-        await outer.classic.PermissionRequest({ tool_name: 'AskUserQuestion', tool_input: { questions: [] } })
+    on('tool.check', () => ASK)
+    // The person answers after a while, each dialog's time this test's.
+    on('classic.PermissionRequest', async (_, e) => {
+      const command = (e.tool_input as { command?: string }).command
+      if (e.tool_name === 'ExitPlanMode') await clock.advance(20_000)
+      else if (e.tool_name === 'AskUserQuestion') await clock.advance(30_000)
+      else if (command === 'just build') await clock.advance(10_000)
+      else {
         await clock.advance(30_000)
-        return { result: { answers: {} } }
+        during = (await textsAt(outer)).find(found => /^Wartezeit /.test(found.text))?.text
       }
-      await outer.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: e.tool === 'Bash' ? e.command : '' } })
-      await clock.advance(30_000)
-      during = (await textsAt(outer)).find(found => /^Wartezeit /.test(found.text))?.text
-      // Approved: the command runs on; the call's end comes later than the answer.
+      return ALLOWED
+    })
+    // Allowed, a command runs a minute.
+    on('tool.run', async (_, e) => {
+      if (e.tool !== 'Bash') return e.tool === 'AskUserQuestion' ? { result: { answers: {} } } : { result: {} }
       await clock.advance(60_000)
       return BASH_OK
     })
@@ -256,43 +248,59 @@ describe('RADAR', () => {
     const row = async () => (await textsAt($)).find(found => /^Wartezeit /.test(found.text))?.text
     expect(await row()).toBeUndefined()
     await $.turn.start({ text: '', turnId: 't1' })
-    await $.tool.call({ tool: 'ExitPlanMode' })
+    await $.tool.call({ tool: 'ExitPlanMode', tool_use_id: 'tu-plan' })
     expect(await row()).toBe('Wartezeit 0:20 · 1 Freigabe')
-    await $.tool.call({ tool: 'AskUserQuestion', questions: [] })
+    await $.tool.call({ tool: 'AskUserQuestion', questions: [], tool_use_id: 'tu-question' })
     expect(await row()).toBe('Wartezeit 0:20 · 1 Freigabe')
-    await $.tool.call({ tool: 'Bash', command: 'just deploy' })
-    // While the dialog stood open the time went on, exact so far.
+    await $.tool.call({ tool: 'Bash', command: 'just deploy', tool_use_id: 'tu-deploy' })
+    // While the dialog stood open the time went on.
     expect(during).toBe('Wartezeit 0:50 · 2 Freigaben')
-    // No run time told: the whole call counts, approximately.
-    expect(await row()).toBe('Wartezeit ≈1:50 · 2 Freigaben')
+    // The minute the command ran after that is no waiting: the same, and exact.
+    expect(await row()).toBe('Wartezeit 0:50 · 2 Freigaben')
     await $.tool.call({ tool: 'Bash', command: 'just build', tool_use_id: 'tu-build' })
-    expect(await row()).toBe('Wartezeit ≈2:00 · 3 Freigaben')
+    expect(await row()).toBe('Wartezeit 1:00 · 3 Freigaben')
   })
 
-  test('the wait: an interrupted approved call is approximate too; a dialog a hook decided counts as one, its wait about none (its answer passes unread)', async ($, on) => {
+  test('the wait: a dialog a hook decided counts as one, its wait none; a refused one waited until the refusal', async ($, on) => {
     const clock = engine(on)
-    const outer = $
-    on('classic.PermissionRequest', (_, e) => (e.tool_input as { command?: string }).command === 'auto' ? { decision: { behavior: 'allow' as const } } : {})
-    on('tool.call', async (_, e) => {
-      const command = e.tool === 'Bash' ? e.command : ''
-      await outer.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command } })
-      if (command === 'auto') return BASH_OK
+    on('tool.check', () => ASK)
+    on('classic.PermissionRequest', async (_, e) => {
+      if ((e.tool_input as { command?: string }).command === 'auto') return ALLOWED
+      // The person looks at it for 70 s, then says no.
       await clock.advance(70_000)
-      await outer.classic.PostToolUseFailure({ tool_name: 'Bash', tool_input: { command }, tool_use_id: e.tool_use_id ?? '', error: 'interrupted', is_interrupt: true })
-      return { isError: true, result: 'interrupted', text: 'interrupted' }
+      return {}
     })
+    on('tool.run', () => BASH_OK)
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     const row = async () => (await textsAt($)).find(found => /^Wartezeit /.test(found.text))?.text
-    await $.tool.call({ tool: 'Bash', command: 'auto' })
-    expect(await row()).toBe('Wartezeit ≈0:00 · 1 Freigabe')
-    await $.tool.call({ tool: 'Bash', command: 'npm run dev', tool_use_id: 'tu-dev' })
-    expect(await row()).toBe('Wartezeit ≈1:10 · 2 Freigaben')
+    await $.tool.call({ tool: 'Bash', command: 'auto', tool_use_id: 'tu-auto' })
+    expect(await row()).toBe('Wartezeit 0:00 · 1 Freigabe')
+    expect((await $.tool.call({ tool: 'Bash', command: 'npm run dev', tool_use_id: 'tu-dev' })).isError).toBe(true)
+    expect(await row()).toBe('Wartezeit 1:10 · 2 Freigaben')
+  })
+
+  test('where a call ran and was never heard to start, its dialog ends with the call: the wait is approximate, the run in it', { plugins: [RUN_UNHEARD] }, async ($, on) => {
+    const clock = engine(on)
+    on('tool.check', () => ASK)
+    on('classic.PermissionRequest', async () => {
+      await clock.advance(10_000)
+      return ALLOWED
+    })
+    on('tool.run', async () => {
+      await clock.advance(60_000)
+      return BASH_OK
+    })
+    await start($)
+    await $.turn.start({ text: '', turnId: 't1' })
+    await $.tool.call({ tool: 'Bash', command: 'just build', tool_use_id: 'tu-build' })
+    expect((await textsAt($)).find(found => /^Wartezeit /.test(found.text))?.text).toBe('Wartezeit ≈1:10 · 1 Freigabe')
+    // An Edit ends as its dialog is answered: nothing to add, so no ≈ for it.
   })
 
   test('RADAR in English', { options: { language: 'en' } }, async ($, on) => {
     engine(on)
-    on('tool.call', (_, e) => failedRun($, e))
+    on('tool.run', (_, e) => FAILED)
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     for (let i = 0; i < 3; i += 1) await $.tool.call({ tool: 'Bash', command: 'just test' })
@@ -340,7 +348,7 @@ describe('RADAR', () => {
       return next(e)
     })
     const SECRET = FAKE.anthropicLong
-    on('tool.call', (_, e) => (e.tool === 'Bash' ? failedRun($, e) : READ_RESULT))
+    on('tool.run', (_, e) => (e.tool === 'Bash' ? FAILED : READ_RESULT))
     on('agent.spawn', () => ({ model: 'm', agentId: 'a1' }))
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
@@ -382,19 +390,16 @@ describe('RADAR', () => {
     engine(on)
     const outer = $
     let narrow: Found[] = []
-    on('classic.PermissionRequest', () => ({}))
-    on('tool.call', async (_, e) => {
-      if (e.tool === 'Bash' && e.command === 'rm -rf build') {
-        await outer.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: e.command } })
-        narrow = await textsAt(outer, 80, 24)
-        return BASH_OK
-      }
-      return failedRun(outer, e)
+    on('tool.check', (_, e) => ({ decision: (e.input as { command?: string }).command === 'rm -rf build' ? 'ask' : 'allow' }))
+    on('classic.PermissionRequest', async () => {
+      narrow = await textsAt(outer, 80, 24)
+      return ALLOWED
     })
+    on('tool.run', (_, e) => (e.tool === 'Bash' && e.command === 'rm -rf build' ? BASH_OK : FAILED))
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     for (let i = 0; i < 3; i += 1) await $.tool.call({ tool: 'Bash', command: 'x', description: 'Run every test there is' })
-    await $.tool.call({ tool: 'Bash', command: 'rm -rf build' })
+    await $.tool.call({ tool: 'Bash', command: 'rm -rf build', tool_use_id: 'tu-rm' })
     // Too narrow for its words, the caption says it shorter rather than cut.
     const asking = narrow.filter(found => found.text === 'Freigabe!')
     expect(asking.length).toBe(1)
