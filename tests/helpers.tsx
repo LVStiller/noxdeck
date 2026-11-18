@@ -123,6 +123,13 @@ export type World = {
    * compacted). Left out, the breakdown's.
    */
   fill?: number | null
+  /** The session's id (`$.session.id()`): SESSION unless given; a /clear or a resume puts another in its place. */
+  sessionId?: string
+  /**
+   * What `$.store` holds, read and written here: a test sees what the plugin
+   * kept, and a start with the same world finds it, as a later session does.
+   */
+  store?: Record<string, unknown>
   /**
    * How the terminal answers a blit: `ok` draws pictures (Ghostty, kitty);
    * `alt` draws the alt instead (the default: a terminal without pictures);
@@ -149,6 +156,11 @@ const BLIT_ANSWERS: Readonly<Record<NonNullable<World['images']>, UiBlitResult>>
   tmuxFix: { deny: 'images are held back by tmux', fix: 'tmux-passthrough' },
   gone: { deny: 'no Image keyed nox is mounted at noxdeck' },
 }
+
+/** A session's id, in the form of one: a free value. */
+export const SESSION = '0b5f7c1e-3a94-4d2b-9c61-7e8f2a4d6b10'
+/** The store key of SESSION's count: the first 16 hex characters of its SHA-256 (`shasum -a 256`), worked out apart from the plugin. */
+export const SESSION_KEY = 'compactions:8f50b9d8c1ec1536'
 
 /** Stands for the engine beneath the plugin; registered before the test's first call on `$`. */
 export function engine(on: On, world: World = {}) {
@@ -212,6 +224,18 @@ export function engine(on: On, world: World = {}) {
     return { value: BLIT_ANSWERS[world.images ?? 'alt'] }
   })
   on('settings.read', () => ({ value: world.isMotionReduced === true ? { prefersReducedMotion: true } : {} }))
+  on('session.id', () => ({ value: world.sessionId ?? SESSION }))
+  // The store keeps JSON data, as the engine's does.
+  on('store.get', (_, e) => ({ value: world.store?.[e.key] }))
+  on('store.set', (_, e) => {
+    world.store = { ...world.store, [e.key]: JSON.parse(JSON.stringify(e.value)) }
+    return { value: undefined }
+  })
+  on('store.delete', (_, e) => {
+    world.store = Object.fromEntries(Object.entries(world.store ?? {}).filter(([key]) => key !== e.key))
+    return { value: undefined }
+  })
+  on('store.keys', () => ({ value: Object.keys(world.store ?? {}) }))
   return clock
 }
 

@@ -70,7 +70,11 @@ export type ContextSample = { tokens: number; window: number }
 export type UsageTrack = {
   /** One sample per measured main-thread turn, oldest first. */
   history: ContextSample[]
-  /** Compactions that stood since noxdeck loaded. */
+  /**
+   * The conversation's compactions as noxdeck counted them: kept in $.store
+   * by the conversation too (hooks/register.tsx), so one taken up again
+   * counts on, and a new one or a /clear starts at 0.
+   */
   compactions: number
   /** Main-loop input tokens summed over observed turns. */
   cacheRead: number

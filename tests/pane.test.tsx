@@ -32,6 +32,8 @@ import {
   failedRun,
   textsAt,
   has,
+  SESSION,
+  SESSION_KEY,
 } from './helpers'
 import type { World, Found, Size } from './helpers'
 import { GUARD } from './guard'
@@ -556,6 +558,221 @@ describe('compactions, counted by the fill a turn or a model request of the main
     await turn($, 't3')
     await request($, 0, 20, 49_611)
     expect(await counted($)).toBe(2)
+  })
+
+  test('a window that has a fill as noxdeck loads and is compacted while idle counts with the next turn; a fresh one counts nothing', async ($, on) => {
+    // Seen on 17 November 2026 (noxdeck 1.1.1): /reload-plugins, then no prompt,
+    // „Compacted while idle“, a prompt hours later; the pane said 326k before
+    // and 69k after, and 1.1.1 counted nothing: no look had found the fill
+    // since the load. The figures are the pane's, rounded.
+    const world: World = { fill: 326_000, window: 1000 * K }
+    engine(on, world)
+    const request = session(on, world)
+    await start($)
+    world.fill = null
+    await turn($, 't1')
+    expect(await counted($)).toBe(1)
+    await request($, 0, 20, 69_000)
+    expect(await counted($)).toBe(1)
+  })
+
+  test('a fresh session, with no fill as noxdeck loads, counts nothing at its first turn', async ($, on) => {
+    const world: World = { fill: null }
+    engine(on, world)
+    const request = session(on, world)
+    await start($)
+    await turn($, 't1')
+    await request($, 0, 14, 47_664)
+    expect(await counted($)).toBe(0)
+    expect(world.store ?? {}).toEqual({})
+  })
+
+  test('once a compaction is counted the header shows the estimate, with ≈, beside the new count; the next measurement is plain again', async ($, on) => {
+    // The breakdown's estimates: 116k before the compaction, 69k after it.
+    const world: World = { fill: 116 * K, messages: [76 * K, 29 * K] }
+    engine(on, world)
+    await start($)
+    const header = async () => {
+      const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns: 60 }, surface: 'terminal' })
+      const found = await ui.find({ type: 'Text', text: / · \d+× komp\. $/ })
+      await ui.unmount()
+      return found?.text
+    }
+    expect(await header()).toBe(` ${P(58)} · 116k / 200k · 0× komp. `)
+    // The compaction leaves no measured fill; the next turn's start counts it and reads the window anew.
+    world.fill = null
+    world.hasResponse = false
+    await turn($, 't1')
+    expect(await header()).toBe(` ≈${P(35)} · ≈69k / 200k · 1× komp. `)
+    // That turn's response is measured: 70k, the status line's figure.
+    world.hasResponse = true
+    world.messages = [30 * K]
+    await $.session.measure({ context: { window: 200 * K, tokens: 70 * K, percent: 35 }, rateLimits: [], changed: ['context'] })
+    expect(await header()).toBe(` ${P(35)} · 70k / 200k · 1× komp. `)
+  })
+
+  // What follows keeps the count by conversation. The session ids are free
+  // values in the form of one; each store key is the first 16 hex characters
+  // of its id's SHA-256 (`shasum -a 256`), worked out apart from the plugin.
+  const OTHER = '9d2e4f60-1b7a-4c85-a3f2-5c6e8b0d1f27'
+  const OTHER_KEY = 'compactions:6d01b3544c8b0d56'
+  /** A compaction, and the main loop's next turn finding the fill gone. */
+  const compactedBefore = async ($: Engine, world: World, turnId: string) => {
+    world.fill = null
+    await turn($, turnId)
+  }
+
+  test('the store holds one entry for the conversation: a short hash of its id, the count and a time, and the id nowhere', async ($, on) => {
+    const world: World = { fill: 47_664 }
+    const clock = engine(on, world)
+    const request = session(on, world)
+    await start($)
+    expect(world.store ?? {}).toEqual({})
+    await compactedBefore($, world, 't1')
+    expect(world.store).toEqual({ [SESSION_KEY]: { count: 1, at: clock.now() } })
+    await request($, 0, 20, 49_611)
+    await clock.advance(5000)
+    await compactedBefore($, world, 't2')
+    expect(world.store).toEqual({ [SESSION_KEY]: { count: 2, at: clock.now() } })
+    // Neither the id nor a piece of it a hash would not hide.
+    const kept = JSON.stringify(world.store)
+    expect(kept.includes(SESSION)).toBe(false)
+    for (const piece of SESSION.split('-')) expect(kept.includes(piece)).toBe(false)
+    expect(SESSION_KEY).toMatch(/^compactions:[0-9a-f]{16}$/)
+  })
+
+  test('a conversation taken up again counts on (--continue, --resume): a later session with the same id finds its count', async ($, on) => {
+    // The store as an earlier session of this conversation left it: two compactions.
+    const world: World = { fill: 141_262, store: { [SESSION_KEY]: { count: 2, at: 400_000 } } }
+    const clock = engine(on, world)
+    const request = session(on, world)
+    await start($)
+    expect(await counted($)).toBe(2)
+    // Taken up, the entry is new again.
+    expect(world.store).toEqual({ [SESSION_KEY]: { count: 2, at: clock.now() } })
+    await request($, 0, 53, 142_955)
+    await compactedBefore($, world, 't2')
+    expect(await counted($)).toBe(3)
+    expect(world.store).toEqual({ [SESSION_KEY]: { count: 3, at: clock.now() } })
+  })
+
+  test('a new conversation starts at 0, whatever the store keeps for others, and leaves their entries as they are', async ($, on) => {
+    const world: World = { fill: 47_664, sessionId: OTHER, store: { [SESSION_KEY]: { count: 2, at: 900_000 } } }
+    engine(on, world)
+    await start($)
+    expect(await counted($)).toBe(0)
+    expect(world.store).toEqual({ [SESSION_KEY]: { count: 2, at: 900_000 } })
+    await compactedBefore($, world, 't1')
+    expect(await counted($)).toBe(1)
+    expect(world.store).toEqual({ [SESSION_KEY]: { count: 2, at: 900_000 }, [OTHER_KEY]: { count: 1, at: 1_000_000 } })
+  })
+
+  test('/clear starts at 0 under the new id; /resume takes up the count of the conversation it returns to', async ($, on) => {
+    const world: World = { fill: 47_664 }
+    const clock = engine(on, world)
+    const request = session(on, world)
+    on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+    await start($)
+    await compactedBefore($, world, 't1')
+    await request($, 0, 20, 49_611)
+    expect(await counted($)).toBe(1)
+    // /clear: the process goes on under another id (the types'), and no session.start fires.
+    await $.session.end({ reason: 'clear', sessionId: SESSION, resume: { id: SESSION } })
+    world.sessionId = OTHER
+    world.fill = null
+    await clock.advance(1000)
+    expect(await counted($)).toBe(0)
+    await turn($, 't2')
+    await request($, 0, 14, 20_000)
+    expect(await counted($)).toBe(0)
+    await compactedBefore($, world, 't3')
+    expect(await counted($)).toBe(1)
+    expect(world.store).toMatchObject({ [SESSION_KEY]: { count: 1 }, [OTHER_KEY]: { count: 1 } })
+    await request($, 0, 14, 21_000)
+    await compactedBefore($, world, 't4')
+    expect(await counted($)).toBe(2)
+    // /resume, back to the first conversation: its one compaction, not the other's two.
+    await $.session.end({ reason: 'resume', sessionId: OTHER, resume: { id: OTHER } })
+    world.sessionId = SESSION
+    world.fill = 49_611
+    await clock.advance(1000)
+    expect(await counted($)).toBe(1)
+    expect(world.store).toMatchObject({ [SESSION_KEY]: { count: 1 }, [OTHER_KEY]: { count: 2 } })
+  })
+
+  test('a prompt right after /clear, before the pane has read the new conversation, still counts under the new id', async ($, on) => {
+    const world: World = { fill: 47_664 }
+    engine(on, world)
+    const request = session(on, world)
+    on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+    await start($)
+    await compactedBefore($, world, 't1')
+    await request($, 0, 20, 49_611)
+    await $.session.end({ reason: 'clear', sessionId: SESSION, resume: { id: SESSION } })
+    world.sessionId = OTHER
+    world.fill = null
+    // Invented: a turn and a compaction within the second the pane waits before it reads the new window.
+    await turn($, 't2')
+    await request($, 0, 14, 20_000)
+    await compactedBefore($, world, 't3')
+    expect(await counted($)).toBe(1)
+    expect(world.store).toMatchObject({ [SESSION_KEY]: { count: 1 }, [OTHER_KEY]: { count: 1 } })
+  })
+
+  test('a count 1.1.1 kept in $.state alone moves into the store at the first start of 1.1.2 (/reload-plugins after the update)', async ($, on) => {
+    // What 1.1.1 wrote: the usage track in the shape it still has, two compactions since its load.
+    const stored = { shape: 'noxdeck/7', value: { history: [], compactions: 2, cacheRead: 0, inputTotal: 0 } }
+    const world: World = { fill: 141_262 }
+    const clock = engine(on, world)
+    on('state.get', { plugin: 'noxdeck', key: 'usage' }, () => ({ value: { value: stored, version: 1 } }) as never)
+    await start($)
+    expect(await counted($)).toBe(2)
+    expect(world.store).toEqual({ [SESSION_KEY]: { count: 2, at: clock.now() } })
+  })
+
+  const DAY = 24 * HOUR
+  const entry = (n: number) => `compactions:${String(n).padStart(16, '0')}`
+
+  test('the store is tidied at the start: an entry not written for more than 30 days goes, and one that is no count; this conversation\'s and other keys stay', async ($, on) => {
+    const now = 100 * DAY
+    const world: World = {
+      fill: 47_664,
+      store: {
+        // Old, and this conversation's: taken up, so it stays and is new again.
+        [SESSION_KEY]: { count: 4, at: now - 40 * DAY },
+        [entry(1)]: { count: 1, at: now - 30 * DAY - 1 },
+        [entry(2)]: { count: 1, at: now - 30 * DAY },
+        // Not a count: removed. A key of another kind: left alone.
+        [entry(3)]: 'x',
+        other: { kept: true },
+      },
+    }
+    const clock = engine(on, world)
+    await clock.set(now)
+    await start($)
+    expect(world.store).toEqual({
+      [SESSION_KEY]: { count: 4, at: now },
+      [entry(2)]: { count: 1, at: now - 30 * DAY },
+      other: { kept: true },
+    })
+  })
+
+  test('the store keeps the newest 50 counts: of sixty-one, the eleven written longest ago go', async ($, on) => {
+    const now = 100 * DAY
+    const store: Record<string, unknown> = {}
+    // Sixty, a minute apart, the higher the newer; this conversation's makes sixty-one, and none is old.
+    for (let n = 100; n < 160; n += 1) store[entry(n)] = { count: 1, at: now - (160 - n) * MINUTE }
+    const world: World = { fill: 47_664, store: { ...store, [SESSION_KEY]: { count: 4, at: now - DAY } } }
+    const clock = engine(on, world)
+    await clock.set(now)
+    await start($)
+    const counts = Object.keys(world.store ?? {}).filter(key => key.startsWith('compactions:'))
+    // This conversation's, taken up, and the 49 newest of the sixty.
+    expect(counts.length).toBe(50)
+    expect(counts.includes(SESSION_KEY)).toBe(true)
+    expect(counts.includes(entry(110))).toBe(false)
+    expect(counts.includes(entry(111))).toBe(true)
+    expect(counts.includes(entry(159))).toBe(true)
   })
 })
 

@@ -79,18 +79,18 @@ In `/config`, jeweils unter `noxdeck.<name>`, oder bei der Installation in einer
 
 ```
 hooks: session.start, command.run{command=noxdeck}, ui.close{id=noxdeck}, tool.call, agent.spawn, tool.check, classic.PreToolUse, classic.PermissionRequest, classic.PermissionDenied, classic.PostToolUseFailure, classic.PostToolUse, turn.step, turn.start, turn.complete, session.measure, session.end, ui.render{component=Pane, requestId=noxdeck} (default matcher key: plugin), ui.render{component=SessionMode}
-calls: $.agent.list, $.clock.after, $.clock.every (via ensureTicker), $.clock.now, $.command.register, $.session.root (via refreshRoot), $.session.usage (via lookForCompaction, refreshContext), $.settings.read (via readMotion), $.state.get, $.state.set, $.tool.list (via refreshTodoTools), $.ui.blit (via blit), $.ui.open (via openPane), $.ui.panes (via isPaneOpen, isPaneShown), $.ui.resolve, $.ui.toast, $.ui.view (via showView)
+calls: $.agent.list, $.clock.after, $.clock.every (via ensureTicker), $.clock.now, $.command.register, $.session.id (via restoreCount), $.session.root (via refreshRoot), $.session.usage (via lookForCompaction, refreshContext), $.settings.read (via readMotion), $.state.get, $.state.set, $.store.delete (via tidyCounts), $.store.get (via restoreCount, tidyCounts), $.store.keys (via tidyCounts), $.store.set (via countCompaction, restoreCount), $.tool.list (via refreshTodoTools), $.ui.blit (via blit), $.ui.open (via openPane), $.ui.panes (via isPaneOpen, isPaneShown), $.ui.resolve, $.ui.toast, $.ui.view (via showView)
 ```
 
-Jeder Hook außer dem, der `/noxdeck` beantwortet, und den beiden, die zeichnen, gibt sein Ereignis unverändert weiter und liefert zurück, was Claude Code geantwortet hat (siehe [Hooks im Einzelnen](#hooks-im-einzelnen)). Die Aufrufe lesen (Tools, Kontextverbrauch, den Projektordner, Agents, Panes, die Einstellung Reduce motion), registrieren `/noxdeck`, betreiben seinen Timer, zeichnen sein eigenes Pane und halten seine Zahlen in seinem eigenen `$.state`. Ein Aufruf handelt, und nur, wenn du auf die Zeile eines Agents drückst: `$.ui.view` zeigt das Transkript dieses Agents in der Hauptansicht; eine Ablehnung (oder, bei einem Agent eines Workflows, wo er zu sehen ist) erscheint mit `$.ui.toast`.
+Jeder Hook außer dem, der `/noxdeck` beantwortet, und den beiden, die zeichnen, gibt sein Ereignis unverändert weiter und liefert zurück, was Claude Code geantwortet hat (siehe [Hooks im Einzelnen](#hooks-im-einzelnen)). Die Aufrufe lesen (Tools, Kontextverbrauch, den Projektordner, Agents, Panes, die Einstellung Reduce motion), registrieren `/noxdeck`, betreiben seinen Timer, zeichnen sein eigenes Pane, halten seine Zahlen in seinem eigenen `$.state` und den Kompaktierungszähler jeder Unterhaltung in seinem eigenen `$.store`. Ein Aufruf handelt, und nur, wenn du auf die Zeile eines Agents drückst: `$.ui.view` zeigt das Transkript dieses Agents in der Hauptansicht; eine Ablehnung (oder, bei einem Agent eines Workflows, wo er zu sehen ist) erscheint mit `$.ui.toast`.
 
-Kein Netzwerk, keine Dateischreibzugriffe, kein Prompt-Logging: noxdeck stellt keine Netzwerkanfragen, schreibt keine Dateien, startet keine Prozesse, ruft kein Modell auf, behält keinen Prompt-Text und liest kein Transkript eines Agents. Geheimnisse in Befehlen, die es zeigt (Tokens, Schlüssel, Passwörter), werden maskiert. Nox' Bilder entstehen im Speicher.
+Kein Netzwerk, kein Prompt-Logging, ein kleiner Eintrag auf der Platte: noxdeck stellt keine Netzwerkanfragen, startet keine Prozesse, ruft kein Modell auf, behält keinen Prompt-Text und liest kein Transkript eines Agents. Über die Sitzung hinaus behält es nur, wie oft jede Unterhaltung kompaktiert wurde, im Plugin-Store, den Claude Code für es führt: ein Kürzel der Session-ID, den Zählerstand und einen Zeitstempel (siehe [PRIVACY.md](PRIVACY.md)). Eine andere Datei schreibt es nicht. Geheimnisse in Befehlen, die es zeigt (Tokens, Schlüssel, Passwörter), werden maskiert. Nox' Bilder entstehen im Speicher.
 
 ### Hooks im Einzelnen
 
 | Hook | Was er beobachtet | Entscheidet oder ändert er etwas? |
 | --- | --- | --- |
-| `session.start` | Den Start der Sitzung: Er liest die Einstellung Reduce motion, den Projektordner, das Kontextfenster und die Agent-Liste, registriert `/noxdeck` und öffnet sein Pane (in einer interaktiven Sitzung, außer du hast es geschlossen). | Nein: Das Ereignis geht unverändert weiter. |
+| `session.start` | Den Start der Sitzung: Er liest die Einstellung Reduce motion, den Projektordner, das Kontextfenster und die Agent-Liste, übernimmt den Kompaktierungszähler der Unterhaltung aus seinem Store, registriert `/noxdeck` und öffnet sein Pane (in einer interaktiven Sitzung, außer du hast es geschlossen). | Nein: Das Ereignis geht unverändert weiter. |
 | `command.run{command=noxdeck}` | Nur `/noxdeck`; kein anderer Befehl erreicht ihn. | Beantwortet `/noxdeck` selbst: öffnet das Pane (auf dem genannten Tab) und antwortet mit einer Zeile. |
 | `ui.close{id=noxdeck}` | Das Schließen seines eigenen Panes. | Nein; er merkt sich, dass du es geschlossen hast, damit das Pane nicht von selbst wieder aufgeht. |
 | `tool.call` | Jeden Tool-Aufruf und sein Ergebnis: das Tool, den Namen einer Datei, die Zeilen, die eine Änderung hinzugefügt und entfernt hat, ob er fehlgeschlagen ist, Claudes Todo-Liste, Name und Kennung eines Workflow-Laufs. | Nein: Aufruf und Ergebnis gehen unverändert weiter. |
@@ -105,7 +105,7 @@ Kein Netzwerk, keine Dateischreibzugriffe, kein Prompt-Logging: noxdeck stellt k
 | `turn.start` | Den Start eines Turns, des Haupt-Chats oder eines Subagents; beim Start im Haupt-Chat, ob das Kontextfenster noch einen Füllstand hat, um eine Kompaktierung zu zählen. | Nein: Das Ereignis geht unverändert weiter. |
 | `turn.complete` | Das Ende eines Turns: warum, wie lange, seine Tokens. | Nein: Das Ereignis geht unverändert weiter. |
 | `session.measure` | Änderungen am Kontextverbrauch und an den Nutzungslimits (5 Stunden, Woche). | Nein: Das Ereignis geht unverändert weiter. |
-| `session.end` | `/clear` oder `/resume`, nach denen das Pane neu beginnt. | Nein: Das Ereignis geht unverändert weiter. |
+| `session.end` | `/clear` oder `/resume`, nach denen das Pane neu beginnt, mit dem Kompaktierungszähler der Unterhaltung, die folgt. | Nein: Das Ereignis geht unverändert weiter. |
 | `ui.render{component=Pane, requestId=noxdeck}` | – | Zeichnet noxdecks eigenes Pane. |
 | `ui.render{component=SessionMode}` | – | Ergänzt die Fußzeile um `noxdeck · <Theme>`, hinter dem, was Claude Code dort zeichnet. |
 
@@ -125,6 +125,8 @@ noxdeck stellt keine Netzwerkanfragen. Was das Modul verlässt, geht an Claude C
 | `$.command.register` | Registriert `/noxdeck`. |
 | `$.agent.list`, `$.tool.list`, `$.session.root`, `$.session.usage` | Lesen die Agents, die Tools des Modells (für die PLAN-Karte), den Projektordner (Pfade werden ab ihm gezeigt) und den Kontextverbrauch. |
 | `$.state.get`, `$.state.set` | Halten die Zahlen des Panes für die Sitzung in noxdecks eigenem State; nichts wird auf die Platte geschrieben. |
+| `$.session.id` | Liest die ID der Sitzung, nur um sie zu hashen: Der Kompaktierungszähler wird pro Unterhaltung geführt. |
+| `$.store.get`, `$.store.set`, `$.store.delete`, `$.store.keys` | Halten den Kompaktierungszähler jeder Unterhaltung über die Sitzung hinaus in noxdecks eigenem Store: ein Kürzel der Session-ID (nie die ID selbst), den Zählerstand und einen Zeitstempel. Einträge, die älter als 30 Tage sind, und alle außer den neuesten 50 werden entfernt. |
 | `$.clock.now`, `$.clock.every`, `$.clock.after` | Lesen die Zeit und betreiben den Timer des Panes. |
 
 noxdeck hat keinen MCP-Server und reicht keine Umgebungsvariablen weiter. [`hooks/secrets.ts`](hooks/secrets.ts) maskiert nur angezeigten Text: Es ersetzt, was im Text eines Tool-Aufrufs wie ein Token, ein Schlüssel oder ein Passwort aussieht, bevor das Pane ihn behält oder zeigt. Es liest keine Umgebungsvariablen und keine Dateien mit Zugangsdaten, und was es maskiert, wird verworfen.

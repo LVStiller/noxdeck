@@ -93,7 +93,9 @@ import type { LimitStyle, Owl, OwlPictures } from './view'
 // noxdeck only watches. Every hook hands the event on unchanged with
 // next(e) and returns what the chain beneath answered; what it learns goes
 // into $.state, which the pane draws from. It makes no network request,
-// starts no process, asks no model, writes no file and keeps no prompt text.
+// starts no process, asks no model and keeps no prompt text. Past the
+// session it keeps one thing, in its own $.store: how often each
+// conversation was compacted (countCompaction).
 // The one thing it does is the person's own: a press on an agent's row (or
 // on the way back) asks the engine to show that transcript in the main view.
 // Its own pane it draws, and swaps the fine Nox's picture there with
@@ -229,12 +231,99 @@ async function refreshContext($: EngineInterface, isTurn: boolean): Promise<void
  * reach a person's plugin where Claude Code's built-in guard sits above it;
  * these two events do. The plain `$.session.usage()` is the status line's
  * figures: it only reads, and counts nothing anew.
+ *
+ * session.start takes a first look, so a window that has a fill as noxdeck
+ * loads and loses it while nothing is asked (a compaction while idle) is
+ * counted at the next turn; a look that is this load's first counts nothing.
  */
 async function lookForCompaction($: EngineInterface): Promise<void> {
   const fill = (await $.session.usage()).context.tokens
   const isCompacted = hadFill && fill === undefined
   hadFill = fill !== undefined
-  if (isCompacted) await update($, usage, track => ({ ...track, compactions: track.compactions + 1 }))
+  if (isCompacted) await countCompaction($)
+}
+
+// The compactions are counted by conversation and kept past the session:
+// one entry in $.store for each conversation that was compacted, under a
+// key made of the first 16 hex characters of the SHA-256 of its session id
+// (never the id itself), holding the count and when it was last written,
+// and nothing else. A conversation taken up again (--continue, /resume)
+// counts on; a new one, a fork under an id of its own and /clear start at 0.
+const COUNT_PREFIX = 'compactions:'
+/** Entries not written for this long are removed at the start, and all but the newest fifty. */
+const COUNT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
+const COUNT_MAX = 50
+
+/** What the store keeps for a conversation: its compactions, and when the entry was last written. */
+type KeptCount = { count: number; at: number }
+
+/** A store value as a kept count; null for anything else. */
+function keptCountOf(value: unknown): KeptCount | null {
+  if (typeof value !== 'object' || value === null) return null
+  const { count, at } = value as Partial<KeptCount>
+  return typeof count === 'number' && Number.isInteger(count) && count >= 0 && typeof at === 'number' && Number.isFinite(at) ? { count, at } : null
+}
+
+/** The store key of a conversation: the prefix and the first 16 hex characters of the SHA-256 of its session id. */
+async function countKeyOf(sessionId: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(sessionId)))
+  return `${COUNT_PREFIX}${[...digest.slice(0, 8)].map(byte => byte.toString(16).padStart(2, '0')).join('')}`
+}
+
+/**
+ * The store key of the conversation whose count `usage` holds. This
+ * module's: null until restoreCount has read it, and again from a /clear or
+ * /resume, which put another conversation in this process.
+ */
+let countKey: string | null = null
+
+/**
+ * Takes up the conversation's count: the larger of what the store keeps for
+ * it and what $.state holds (a reload within the conversation, or a count
+ * 1.1.1 made before it), written to both. An entry read is written again,
+ * so one in use stays new.
+ */
+async function restoreCount($: EngineInterface): Promise<void> {
+  const key = await countKeyOf(await $.session.id())
+  countKey = key
+  const kept = keptCountOf(await $.store.get(key))
+  const held = (await read($, usage)).compactions
+  const count = Math.max(kept?.count ?? 0, held)
+  if (count !== held) await update($, usage, track => ({ ...track, compactions: count }))
+  if (count > 0) await $.store.set(key, { count, at: await $.clock.now() } satisfies KeptCount)
+}
+
+/** Removes the store's entries that are too old or too many; this conversation's stays. */
+async function tidyCounts($: EngineInterface): Promise<void> {
+  const at = await $.clock.now()
+  const entries: { key: string; at: number | null }[] = []
+  for (const key of await $.store.keys()) {
+    if (key.startsWith(COUNT_PREFIX)) entries.push({ key, at: keptCountOf(await $.store.get(key))?.at ?? null })
+  }
+  const newest = entries
+    .filter((entry): entry is { key: string; at: number } => entry.at !== null && at - entry.at <= COUNT_MAX_AGE_MS)
+    .sort((a, b) => b.at - a.at)
+    .slice(0, COUNT_MAX)
+  const kept = new Set([...newest.map(entry => entry.key), countKey])
+  for (const { key } of entries) if (!kept.has(key)) await $.store.delete(key)
+}
+
+/**
+ * Counts a compaction for this conversation, in $.state and in the store.
+ * The measured fill went with it, so the window is read again: until the
+ * next response is measured, the header shows the breakdown's estimate (≈)
+ * beside the new count, not the fill from before.
+ */
+async function countCompaction($: EngineInterface): Promise<void> {
+  if (countKey === null) await quietly(() => restoreCount($))
+  let count = 0
+  await update($, usage, track => {
+    count = track.compactions + 1
+    return { ...track, compactions: count }
+  })
+  const key = countKey
+  if (key !== null) await quietly(async () => $.store.set(key, { count, at: await $.clock.now() } satisfies KeptCount))
+  await quietly(() => refreshContext($, false))
 }
 
 /**
@@ -869,6 +958,10 @@ export const register: Register = (on, options) => {
     })
     await quietly(() => refreshTodoTools($))
     await quietly(() => refreshRoot($))
+    // The conversation's compactions so far, the store tidied, and the first look at the window's fill.
+    await quietly(() => restoreCount($))
+    await quietly(() => tidyCounts($))
+    await quietly(() => lookForCompaction($))
     return started
   })
 
@@ -1298,8 +1391,17 @@ export const register: Register = (on, options) => {
         agentsAsking.clear()
         pendingSpawns = []
         hadFill = false
+        // The conversation that takes the place has an id of its own, and with it a count of its own.
+        countKey = null
         await update($, context, () => null)
-        $.clock.after(1000, () => void quietly(() => refreshContext($, false)))
+        $.clock.after(
+          1000,
+          () =>
+            void quietly(async () => {
+              await quietly(() => restoreCount($))
+              await refreshContext($, false)
+            }),
+        )
       })
     }
     return ended

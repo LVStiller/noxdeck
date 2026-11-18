@@ -6,7 +6,7 @@ noxdeck is a Claude Code mod. It runs inside Claude Code on your machine and onl
 
 - It collects no data and has no telemetry or analytics.
 - It sends nothing anywhere: it makes no network requests, starts no processes and calls no model.
-- It writes no files and keeps nothing beyond the running session.
+- It keeps one thing beyond the running session: how often each conversation was compacted (see [Where it is kept](#where-it-is-kept)). It writes no other file.
 - It keeps no prompt text and reads no agent's transcript.
 
 ## What it processes
@@ -15,7 +15,9 @@ To draw its pane, noxdeck reads what Claude Code passes to its hooks during the 
 
 ## Where it is kept
 
-noxdeck keeps its figures in its own `$.state`: values Claude Code holds in memory for the running session. noxdeck uses no persistent storage and writes nothing to disk. Like any mod's state, other mods running in the same session can read these values.
+noxdeck keeps its figures in its own `$.state`: values Claude Code holds in memory for the running session. Like any mod's state, other mods running in the same session can read these values.
+
+One figure outlasts the session, so that a conversation you continue keeps its count: how often each conversation was compacted. noxdeck keeps it in its own `$.store`, a JSON file Claude Code keeps for the plugin in your Claude Code configuration folder on this machine. An entry holds a short hash of the conversation's session id (the first 16 hex characters of its SHA-256, never the id itself), the count and a timestamp, and nothing else. Entries not written for more than 30 days are removed, and all but the newest 50.
 
 ## Ko-fi
 

@@ -79,18 +79,18 @@ In `/config`, each under `noxdeck.<name>`, or when installing in a shell with `-
 
 ```
 hooks: session.start, command.run{command=noxdeck}, ui.close{id=noxdeck}, tool.call, agent.spawn, tool.check, classic.PreToolUse, classic.PermissionRequest, classic.PermissionDenied, classic.PostToolUseFailure, classic.PostToolUse, turn.step, turn.start, turn.complete, session.measure, session.end, ui.render{component=Pane, requestId=noxdeck} (default matcher key: plugin), ui.render{component=SessionMode}
-calls: $.agent.list, $.clock.after, $.clock.every (via ensureTicker), $.clock.now, $.command.register, $.session.root (via refreshRoot), $.session.usage (via lookForCompaction, refreshContext), $.settings.read (via readMotion), $.state.get, $.state.set, $.tool.list (via refreshTodoTools), $.ui.blit (via blit), $.ui.open (via openPane), $.ui.panes (via isPaneOpen, isPaneShown), $.ui.resolve, $.ui.toast, $.ui.view (via showView)
+calls: $.agent.list, $.clock.after, $.clock.every (via ensureTicker), $.clock.now, $.command.register, $.session.id (via restoreCount), $.session.root (via refreshRoot), $.session.usage (via lookForCompaction, refreshContext), $.settings.read (via readMotion), $.state.get, $.state.set, $.store.delete (via tidyCounts), $.store.get (via restoreCount, tidyCounts), $.store.keys (via tidyCounts), $.store.set (via countCompaction, restoreCount), $.tool.list (via refreshTodoTools), $.ui.blit (via blit), $.ui.open (via openPane), $.ui.panes (via isPaneOpen, isPaneShown), $.ui.resolve, $.ui.toast, $.ui.view (via showView)
 ```
 
-Every hook but the one answering `/noxdeck` and the two that draw passes its event on unchanged and returns what Claude Code answered (see [Hooks in detail](#hooks-in-detail)). The calls read (tools, context usage, the project root, agents, panes, the Reduce motion setting), register `/noxdeck`, run its timer, draw its own pane and keep its figures in its own `$.state`. One call acts, and only when you press an agent's row: `$.ui.view` shows that agent's transcript in the main view; a refusal (or, for a workflow's agent, where to see it) is shown with `$.ui.toast`.
+Every hook but the one answering `/noxdeck` and the two that draw passes its event on unchanged and returns what Claude Code answered (see [Hooks in detail](#hooks-in-detail)). The calls read (tools, context usage, the project root, agents, panes, the Reduce motion setting), register `/noxdeck`, run its timer, draw its own pane, keep its figures in its own `$.state` and keep the compaction count of each conversation in its own `$.store`. One call acts, and only when you press an agent's row: `$.ui.view` shows that agent's transcript in the main view; a refusal (or, for a workflow's agent, where to see it) is shown with `$.ui.toast`.
 
-No network, no file writes, no prompt logging: noxdeck makes no network requests, writes no files, starts no processes, calls no model, keeps no prompt text and reads no agent's transcript. Secrets in commands it shows (tokens, keys, passwords) are masked. Nox's pictures are made in memory.
+No network, no prompt logging, one small entry on disk: noxdeck makes no network requests, starts no processes, calls no model, keeps no prompt text and reads no agent's transcript. The one thing it keeps past the session is how often each conversation was compacted, in the plugin store Claude Code keeps for it: a short hash of the session id, the count and a timestamp (see [PRIVACY.md](PRIVACY.md)). It writes no other file. Secrets in commands it shows (tokens, keys, passwords) are masked. Nox's pictures are made in memory.
 
 ### Hooks in detail
 
 | Hook | What it observes | Decides or changes |
 | --- | --- | --- |
-| `session.start` | The session starting: it reads the Reduce motion setting, the project folder, the context window and the agent list, registers `/noxdeck` and opens its pane (in an interactive session, unless you closed it). | Nothing: the event passes on unchanged. |
+| `session.start` | The session starting: it reads the Reduce motion setting, the project folder, the context window and the agent list, takes up the conversation's compaction count from its store, registers `/noxdeck` and opens its pane (in an interactive session, unless you closed it). | Nothing: the event passes on unchanged. |
 | `command.run{command=noxdeck}` | Only `/noxdeck`; no other command reaches it. | Answers `/noxdeck` itself: opens the pane (on the tab named) and replies with one line. |
 | `ui.close{id=noxdeck}` | Its own pane closing. | Nothing; it remembers that you closed it, so the pane does not open by itself again. |
 | `tool.call` | Every tool call and its result: the tool, a file's name, the lines a change added and removed, whether it failed, Claude's todo list, a workflow run's name and id. | Nothing: the call and its result pass unchanged. |
@@ -105,7 +105,7 @@ No network, no file writes, no prompt logging: noxdeck makes no network requests
 | `turn.start` | A turn starting, the main chat's or a subagent's; as the main chat's starts, whether the context window still has a fill, to count a compaction. | Nothing: the event passes on unchanged. |
 | `turn.complete` | A turn ending: why, how long, its tokens. | Nothing: the event passes on unchanged. |
 | `session.measure` | The context usage and the usage limits (5-hour, weekly) changing. | Nothing: the event passes on unchanged. |
-| `session.end` | `/clear` or `/resume`, after which the pane starts over. | Nothing: the event passes on unchanged. |
+| `session.end` | `/clear` or `/resume`, after which the pane starts over, with the compaction count of the conversation that follows. | Nothing: the event passes on unchanged. |
 | `ui.render{component=Pane, requestId=noxdeck}` | – | Draws noxdeck's own pane. |
 | `ui.render{component=SessionMode}` | – | Adds `noxdeck · <theme>` to the footer, after what Claude Code draws there. |
 
@@ -125,6 +125,8 @@ noxdeck makes no network requests. What leaves the module goes to Claude Code on
 | `$.command.register` | Registers `/noxdeck`. |
 | `$.agent.list`, `$.tool.list`, `$.session.root`, `$.session.usage` | Read the agents, the model's tools (for the PLAN card), the project folder (paths are shown from it) and the context usage. |
 | `$.state.get`, `$.state.set` | Keep the pane's figures in noxdeck's own state for the session; nothing is written to disk. |
+| `$.session.id` | Reads the session's id, only to hash it: the compaction count is kept by conversation. |
+| `$.store.get`, `$.store.set`, `$.store.delete`, `$.store.keys` | Keep the compaction count of each conversation in noxdeck's own store, past the session: a short hash of the session id (never the id), the count and a timestamp. Entries older than 30 days and all but the newest 50 are removed. |
 | `$.clock.now`, `$.clock.every`, `$.clock.after` | Read the time and run the pane's timer. |
 
 noxdeck has no MCP server and forwards no environment variables. [`hooks/secrets.ts`](hooks/secrets.ts) only masks displayed text: it replaces what looks like a token, key or password in a tool call's text before the pane keeps or shows it. It reads no environment variables or credential files, and what it masks is dropped.
