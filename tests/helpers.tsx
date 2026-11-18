@@ -403,10 +403,17 @@ export const BASH_OK = { result: { stdout: '', stderr: '', interrupted: false } 
 // no), `tool.run`'s the tool itself. noxdeck hooks tool.check, tool.judge
 // and tool.run, and no classic event.
 //
-// Invented: that tool.run reaches a plugin for every call that was allowed,
-// and what its answer looks like for a tool that failed (FAILED), is the
-// types' and this kit's (Claude Code 2.1.327); no live session has been
-// recorded with it yet. The same holds for every tool.judge a test raises.
+// Recorded on 18 November 2026 (Claude Code 2.1.327), with no plugin above
+// and under the built-in guard alike: a call's tool.call, its tool.check
+// (`{ decision, reason }`, the input's `approver` `person`), for an `ask`
+// the dialog, then tool.run, whose answer is the call's: `{ ref, result,
+// text }`, and for a Bash command that exits with an error (`ls` of a
+// folder that is not there) `{ isError, isReadOnly, ref, result, text }`.
+// `ref` is core's own; FAILED is that answer without it.
+//
+// Invented: every tool.judge a test raises. None has been recorded: auto
+// mode settled the one command it was given (`touch` in the working
+// folder) with no classifier, and so with no tool.judge.
 
 /** The dialog's answer once the person, or a settings hook, allows the call. */
 export const ALLOWED = { decision: { behavior: 'allow' } } as const

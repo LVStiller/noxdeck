@@ -35,6 +35,7 @@ import {
   SESSION,
   SESSION_KEY,
   ALLOWED,
+  ASK,
   BASH_OK,
   posesOver,
   framesIn,
@@ -1067,7 +1068,8 @@ describe('observer', () => {
   test('tool.judge, tool.run and agent.spawn pass their events on unchanged and what answered them back as it came', async ($, on) => {
     engine(on)
     const seen: unknown[] = []
-    // Invented: a tool.judge and a tool.run as the types give their inputs and answers; no session has been recorded with either.
+    // The run's answer is a recorded one's (18 November 2026, Claude Code 2.1.327), without core's `ref`.
+    // Invented: the tool.judge, its input and answer the types'; none has been recorded.
     const judged = { decision: 'allow' as const, reason: 'a read in the working directory' }
     const ran = { result: { stdout: 'ok', stderr: '', interrupted: false } }
     const spawned = { model: 'm', agentId: 'a1' }
@@ -1097,29 +1099,31 @@ describe('observer', () => {
     test(`${where}: a failing command counts in RADAR and startles Nox; a call put to the person says „braucht deine Freigabe“ and counts its wait`, above, async ($, on) => {
       const clock = engine(on)
       const outer = $
-      let caption: string | undefined
-      // The two commands recorded under the guard on 17 November 2026 (Claude Code 2.1.326): `ls` of a
-      // folder that is not there came back errored, `touch` was asked about (tool.check: ask) and its
-      // call ended 22 s later. Invented until recorded: the run's answer and that tool.run arrives.
-      on('tool.check', (_, e) => ({ decision: e.tool_use_id === 'tu-touch' ? 'ask' : 'allow' }))
-      on('classic.PermissionRequest', async () => {
-        await clock.advance(22_000)
+      const captions: (string | undefined)[] = []
+      // The two commands as recorded under the guard on 18 November 2026 (Claude Code 2.1.327, manual
+      // mode): each was asked about (tool.check: ask). `ls` of a folder that is not there was allowed
+      // after 14.381 s and its run came back errored; `touch` was allowed after 9.707 s and ran.
+      on('tool.check', () => ASK)
+      on('classic.PermissionRequest', async (_, e) => {
+        await clock.advance((e.tool_input as { command: string }).command.startsWith('ls ') ? 14_381 : 9_707)
         const ui = await outer.ui.mount({ ...PANE, surface: 'terminal' })
-        caption = (await captionOf(ui))?.text
+        captions.push((await captionOf(ui))?.text)
         await ui.unmount()
         return ALLOWED
       })
-      on('tool.run', (_, e) => (e.tool_use_id === 'tu-ls' ? FAILED : BASH_OK))
+      on('tool.run', (_, e) => (e.tool_use_id === 'tu-ls' ? { ...FAILED, isReadOnly: true as const } : BASH_OK))
       await start($)
       await $.turn.start({ text: '', turnId: 't1' })
       await $.tool.call({ tool: 'Bash', command: 'ls /nicht-vorhanden-noxdeck', tool_use_id: 'tu-ls' })
       expect(framesIn(await posesOver($, clock, 1000))).toContain('startled')
-      expect(has(await textsAt($), /^Fehler 1 · zuletzt Bash gerade eben$/)).toBe(true)
+      const failed = await textsAt($)
+      expect(has(failed, /^Fehler 1 · zuletzt Bash gerade eben$/)).toBe(true)
+      expect(has(failed, /^Wartezeit 0:14 · 1 Freigabe$/)).toBe(true)
       await $.tool.call({ tool: 'Bash', command: 'touch freigabe-test.txt', tool_use_id: 'tu-touch' })
-      expect(caption).toBe('braucht deine Freigabe')
-      // The wait to the moment the call was allowed, exact; one approval; still one failure.
+      expect(captions).toEqual(['braucht deine Freigabe', 'braucht deine Freigabe'])
+      // The waits to the moments the calls were allowed, exact (24.088 s as recorded); two approvals; still one failure.
       const texts = await textsAt($)
-      expect(has(texts, /^Wartezeit 0:22 · 1 Freigabe$/)).toBe(true)
+      expect(has(texts, /^Wartezeit 0:24 · 2 Freigaben$/)).toBe(true)
       expect(has(texts, /^Fehler 1 · /)).toBe(true)
     })
   }

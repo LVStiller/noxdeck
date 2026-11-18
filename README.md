@@ -57,7 +57,7 @@ To update: `claude plugin marketplace update noxdeck`, `claude plugin update nox
 
 ## Tested with
 
-Claude Code 2.1.326. The mod API is early access and may change between releases.
+Claude Code 2.1.327. The mod API is early access and may change between releases.
 
 ## Settings
 

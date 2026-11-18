@@ -57,7 +57,7 @@ Aktualisieren: `claude plugin marketplace update noxdeck`, `claude plugin update
 
 ## Getestet mit
 
-Claude Code 2.1.326. Die Mod-API ist Early Access und kann sich zwischen Releases ändern.
+Claude Code 2.1.327. Die Mod-API ist Early Access und kann sich zwischen Releases ändern.
 
 ## Einstellungen
 
