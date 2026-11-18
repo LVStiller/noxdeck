@@ -21,3 +21,18 @@ export const GUARD: Plugin = {
     on('session.compact', ($, e, next) => next.to(e, 'append'))
   },
 }
+
+/**
+ * Invented: a plugin above noxdeck that sends `tool.run` past a person's
+ * plugins, as the guard does the classic events. The guard itself does not
+ * (its `tool.run` hook hands the call on with `next(e)`); this stands for a
+ * session where the event would not arrive, to show what noxdeck falls back
+ * to there.
+ */
+export const RUN_UNHEARD: Plugin = {
+  name: 'run-unheard',
+  tier: 'prepend',
+  register(on) {
+    on('tool.run', ($, e, next) => next.to(e, 'append'))
+  },
+}

@@ -56,7 +56,7 @@ import {
   posesOver,
   framesIn,
   READ_RESULT,
-  failedRun,
+  FAILED,
 } from './helpers'
 import type { World, Found, Size } from './helpers'
 
@@ -923,8 +923,8 @@ describe('fine Nox in the pane', () => {
     expect(await ui.find({ type: 'Text', text: '· bereit ' })).toBeDefined()
     await ui.unmount()
     // The picture of Nox is two rows taller than the blocks: it shows from two rows more.
-    expect(await shownPicture($, { rows: 32, columns: 48 })).toMatch(/^fineMini:/)
-    expect(await shownPicture($, { rows: 33, columns: 48 })).toMatch(/^fine:/)
+    expect(await shownPicture($, { rows: 31, columns: 48 })).toMatch(/^fineMini:/)
+    expect(await shownPicture($, { rows: 32, columns: 48 })).toMatch(/^fine:/)
     // Too narrow for the mini owl: none.
     expect(await shownPicture($, { rows: SHORT.rows, columns: 39 })).toBe('hidden')
   })
@@ -984,9 +984,9 @@ describe('fine Nox in the pane', () => {
       const world: World = { ...PICTURES, blits: [] }
       const clock = engine(on, world)
       const outer = $
-      on('tool.call', async (_, e) => {
+      on('tool.run', async (_, e) => {
         await clock.advance(3000)
-        return e.tool === 'Bash' ? failedRun(outer, e) : READ_RESULT
+        return e.tool === 'Bash' ? FAILED : READ_RESULT
       })
       await startWithPictures($, clock)
       const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -1052,7 +1052,7 @@ describe('fine Nox in the pane', () => {
 
   test('a failure: fehler; a failure in a loop: the loop warning, the picture in the pane', { options: FEIN }, async ($, on) => {
     const clock = engine(on, PICTURES)
-    on('tool.call', (_, e) => failedRun($, e))
+    on('tool.run', (_, e) => FAILED)
     await startWithPictures($, clock)
     await $.turn.start({ text: '', turnId: 't1' })
     await $.tool.call({ tool: 'Bash', command: 'npm test', description: 'Run the tests' })

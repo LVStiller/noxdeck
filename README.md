@@ -24,14 +24,14 @@ A Claude Code mod: a retro terminal dashboard in a pane beside the transcript, w
 
 - **Live** (the default tab):
   - **STATUS**: the file Claude is editing, the usage limit as five hearts or a ten-cell bar with when it resets, and Nox with a caption (working, ready, needs your approval, asking you, error, done, agents at work). The limit is the 5-hour one (`5h limit · 70% left`, reset as a time of day); where the account has none, as on Ultra, the weekly limit for all models (`week · 83% left`, reset as weekday and time). Without either, as off a subscription, the line is left out.
-  - **CONTEXT**: how full the context window is, by source (messages, MCP, tools, memory, skills, system), a history, growth per turn, cache hit rate and how much is left until auto-compaction.
+  - **CONTEXT**: how full the context window is, by source (messages, MCP, tools, memory, skills, system), a history, growth per turn, cache hit rate and how much is left until auto-compaction. The header ends with how often the conversation was compacted (`0× comp.`). The count is kept per conversation: one you continue (`--continue`, `/resume`) counts on, a new one and `/clear` start at 0. Compactions while the session sat idle count too; those from before noxdeck was installed are missing.
   - **RADAR**: the same call failing again and again, failures since load, the files read or edited most (hotspots) and how long approval dialogs waited on you. While the session has a todo tool, **PLAN** shows Claude's todo list in its place.
 - **Changes**: the files changed in this session, with lines added and removed, each by its path from the project folder. Cache and build files a Bash command makes on the side (in `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `node_modules`, `.venv` or `.git`, `*.pyc`, `*.pyo`, `.DS_Store`) are counted below the list, not listed; an Edit or Write there is always listed.
 - **Agents**: what the main chat, the subagents and other loops processed since load, each subagent's model, tokens and current activity, in groups that fold, and a timeline. A workflow's agents stand under their run, a line per run with its name, agents, tokens and time; running agents always show one by one with what they do; older runs that no longer fit are summed in one line. An opened run lists its agents in the order its script started them and counts those that find no row (`+38 more`); where the pane is short and about 100 columns wide, the finished runs stand in two columns, filled one after the other, an opened run whole in one. The head counts every agent since load. A press on an agent's row shows its transcript in the main view.
 
 Nox is a pixel picture where the terminal draws pictures (Ghostty, kitty; iTerm2 3.5 and later in fullscreen rendering; tmux with `allow-passthrough` and `focus-events` on) and block characters everywhere else. It reads, writes, runs the shell, thinks, waves when a subagent starts, waits for you, is glad when the turn is done, startles at a failure, warns of a loop, sweats when the context fills up, gets tired when the limit STATUS shows runs low (under 20 % left), and yawns and sleeps after two minutes without a turn. Where the pane is short, a mini owl takes its place.
 
-**On Team and Enterprise plans, or where an organization manages Claude Code's settings.** There Claude Code can run a built-in plugin ahead of yours that passes some events on past other plugins. noxdeck 1.1.1 counts compactions there too. Four displays stay empty under it for now and are planned for an upcoming release: "needs your approval" on Nox, the time approval dialogs waited on you, tool failures in RADAR, and the startled owl. On every plan, the compaction count rises with your next prompt after `/compact`, not at once.
+**On Team and Enterprise plans, or where an organization manages Claude Code's settings,** noxdeck shows the same as everywhere else since 1.1.2. On every plan, the compaction count rises with your next prompt after a compaction, not at once.
 
 ## Installation
 
@@ -57,7 +57,7 @@ To update: `claude plugin marketplace update noxdeck`, `claude plugin update nox
 
 ## Tested with
 
-Claude Code 2.1.326. The mod API is early access and may change between releases.
+Claude Code 2.1.327. The mod API is early access and may change between releases.
 
 ## Settings
 
@@ -75,37 +75,34 @@ In `/config`, each under `noxdeck.<name>`, or when installing in a shell with `-
 
 ## What this mod can do
 
-`claude plugin validate .` reads the hooks module the way Claude Code loads it and prints every event it hooks and every call it makes on `$`. For noxdeck 1.1.1:
+`claude plugin validate .` reads the hooks module the way Claude Code loads it and prints every event it hooks and every call it makes on `$`. For noxdeck 1.1.2:
 
 ```
-hooks: session.start, command.run{command=noxdeck}, ui.close{id=noxdeck}, tool.call, agent.spawn, tool.check, classic.PreToolUse, classic.PermissionRequest, classic.PermissionDenied, classic.PostToolUseFailure, classic.PostToolUse, turn.step, turn.start, turn.complete, session.measure, session.end, ui.render{component=Pane, requestId=noxdeck}, ui.render{component=SessionMode}
-calls: $.agent.list, $.clock.after, $.clock.every (via ensureTicker), $.clock.now, $.command.register, $.session.root (via refreshRoot), $.session.usage (via lookForCompaction, refreshContext), $.settings.read (via readMotion), $.state.get, $.state.set, $.tool.list (via refreshTodoTools), $.ui.blit (via blit), $.ui.open (via openPane), $.ui.panes (via isPaneOpen, isPaneShown), $.ui.resolve, $.ui.toast, $.ui.view (via showView)
+hooks: session.start, command.run{command=noxdeck}, ui.close{id=noxdeck}, tool.call, agent.spawn, tool.check, tool.judge, tool.run, turn.step, turn.start, turn.complete, session.measure, session.end, ui.render{component=Pane, requestId=noxdeck} (default matcher key: plugin), ui.render{component=SessionMode}
+calls: $.agent.list, $.clock.after, $.clock.every (via ensureTicker), $.clock.now, $.command.register, $.session.id (via restoreCount), $.session.root (via refreshRoot), $.session.usage (via lookForCompaction, refreshContext), $.settings.read (via readMotion), $.state.get, $.state.set, $.store.delete (via tidyCounts), $.store.get (via restoreCount, tidyCounts), $.store.keys (via tidyCounts), $.store.set (via countCompaction, restoreCount), $.tool.list (via refreshTodoTools), $.ui.blit (via blit), $.ui.open (via openPane), $.ui.panes (via isPaneOpen, isPaneShown), $.ui.resolve, $.ui.toast, $.ui.view (via showView)
 ```
 
-Every hook but the one answering `/noxdeck` and the two that draw passes its event on unchanged and returns what Claude Code answered (see [Hooks in detail](#hooks-in-detail)). The calls read (tools, context usage, the project root, agents, panes, the Reduce motion setting), register `/noxdeck`, run its timer, draw its own pane and keep its figures in its own `$.state`. One call acts, and only when you press an agent's row: `$.ui.view` shows that agent's transcript in the main view; a refusal (or, for a workflow's agent, where to see it) is shown with `$.ui.toast`.
+Every hook but the one answering `/noxdeck` and the two that draw passes its event on unchanged and returns what Claude Code answered (see [Hooks in detail](#hooks-in-detail)). The calls read (tools, context usage, the project root, agents, panes, the Reduce motion setting), register `/noxdeck`, run its timer, draw its own pane, keep its figures in its own `$.state` and keep the compaction count of each conversation in its own `$.store`. One call acts, and only when you press an agent's row: `$.ui.view` shows that agent's transcript in the main view; a refusal (or, for a workflow's agent, where to see it) is shown with `$.ui.toast`.
 
-No network, no file writes, no prompt logging: noxdeck makes no network requests, writes no files, starts no processes, calls no model, keeps no prompt text and reads no agent's transcript. Secrets in commands it shows (tokens, keys, passwords) are masked. Nox's pictures are made in memory.
+No network, no prompt logging, one small entry on disk: noxdeck makes no network requests, starts no processes, calls no model, keeps no prompt text and reads no agent's transcript. The one thing it keeps past the session is how often each conversation was compacted, in the plugin store Claude Code keeps for it under `plugins/store/` in your Claude Code configuration folder (by default `~/.claude/plugins/store/`): a short hash of the session id, the count and a timestamp, for 30 days and for at most 50 conversations. Nothing of it leaves your machine (see [PRIVACY.md](PRIVACY.md)). It writes no other file. Secrets in commands it shows (tokens, keys, passwords) are masked. Nox's pictures are made in memory.
 
 ### Hooks in detail
 
 | Hook | What it observes | Decides or changes |
 | --- | --- | --- |
-| `session.start` | The session starting: it reads the Reduce motion setting, the project folder, the context window and the agent list, registers `/noxdeck` and opens its pane (in an interactive session, unless you closed it). | Nothing: the event passes on unchanged. |
+| `session.start` | The session starting: it reads the Reduce motion setting, the project folder, the context window and the agent list, takes up the conversation's compaction count from its store, registers `/noxdeck` and opens its pane (in an interactive session, unless you closed it). | Nothing: the event passes on unchanged. |
 | `command.run{command=noxdeck}` | Only `/noxdeck`; no other command reaches it. | Answers `/noxdeck` itself: opens the pane (on the tab named) and replies with one line. |
 | `ui.close{id=noxdeck}` | Its own pane closing. | Nothing; it remembers that you closed it, so the pane does not open by itself again. |
 | `tool.call` | Every tool call and its result: the tool, a file's name, the lines a change added and removed, whether it failed, Claude's todo list, a workflow run's name and id. | Nothing: the call and its result pass unchanged. |
 | `agent.spawn` | A subagent starting: its description, its type, whether a workflow started it and which run (its prompt only as a hash and a length, to tell its first turn by). | Nothing: `return next(e)`, the answer unread. |
-| `tool.check` | That a call reached the permission check. | Nothing: `return next(e)`, the verdict unread. |
-| `classic.PreToolUse` | That a call reached the PreToolUse hooks. | Nothing: `return next(e)`. |
-| `classic.PermissionRequest` | A permission dialog opening: Nox shows a ? until the call ends. | Nothing: `return next(e)`, the answer unread. |
-| `classic.PermissionDenied` | The auto-mode check refusing a call, so RADAR does not count it as a failure. | Nothing: `return next(e)`. |
-| `classic.PostToolUseFailure` | A tool that failed or was interrupted as it ran, and how long it ran. | Nothing: `return next(e)`. |
-| `classic.PostToolUse` | A tool that ran, and how long it ran. | Nothing: `return next(e)`. |
+| `tool.check` | A call's permission check and its verdict. Once an `ask` has stood open for a second with no `tool.run` and no `tool.judge`, it is a dialog waiting on you: Nox shows a ?, an approval is counted, and the wait runs from the `ask`. | Nothing: the verdict is read and handed back as it came. |
+| `tool.judge` | That auto mode's classifier is asked about a call: no dialog of yours, so no ? and no approval counted. | Nothing: `return next(e)`, the answer unread. |
+| `tool.run` | A call that was allowed starting to run: its dialog, if it had one, ends here, and the wait with it. | Nothing: the call and its answer pass unchanged. |
 | `turn.step` | Each model request's tokens, once its response is whole; as a request of the main chat begins, whether the context window still has a fill, to count a compaction. | Nothing: every chunk and the result pass through as they came; model and effort are never rewritten. |
 | `turn.start` | A turn starting, the main chat's or a subagent's; as the main chat's starts, whether the context window still has a fill, to count a compaction. | Nothing: the event passes on unchanged. |
 | `turn.complete` | A turn ending: why, how long, its tokens. | Nothing: the event passes on unchanged. |
 | `session.measure` | The context usage and the usage limits (5-hour, weekly) changing. | Nothing: the event passes on unchanged. |
-| `session.end` | `/clear` or `/resume`, after which the pane starts over. | Nothing: the event passes on unchanged. |
+| `session.end` | `/clear` or `/resume`, after which the pane starts over, with the compaction count of the conversation that follows. | Nothing: the event passes on unchanged. |
 | `ui.render{component=Pane, requestId=noxdeck}` | – | Draws noxdeck's own pane. |
 | `ui.render{component=SessionMode}` | – | Adds `noxdeck · <theme>` to the footer, after what Claude Code draws there. |
 
@@ -125,6 +122,8 @@ noxdeck makes no network requests. What leaves the module goes to Claude Code on
 | `$.command.register` | Registers `/noxdeck`. |
 | `$.agent.list`, `$.tool.list`, `$.session.root`, `$.session.usage` | Read the agents, the model's tools (for the PLAN card), the project folder (paths are shown from it) and the context usage. |
 | `$.state.get`, `$.state.set` | Keep the pane's figures in noxdeck's own state for the session; nothing is written to disk. |
+| `$.session.id` | Reads the session's id, only to hash it: the compaction count is kept by conversation. |
+| `$.store.get`, `$.store.set`, `$.store.delete`, `$.store.keys` | Keep the compaction count of each conversation in noxdeck's own store, past the session: a short hash of the session id (never the id), the count and a timestamp. Entries older than 30 days and all but the newest 50 are removed. |
 | `$.clock.now`, `$.clock.every`, `$.clock.after` | Read the time and run the pane's timer. |
 
 noxdeck has no MCP server and forwards no environment variables. [`hooks/secrets.ts`](hooks/secrets.ts) only masks displayed text: it replaces what looks like a token, key or password in a tool call's text before the pane keeps or shows it. It reads no environment variables or credential files, and what it masks is dropped.

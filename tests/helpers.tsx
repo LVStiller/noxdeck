@@ -123,6 +123,13 @@ export type World = {
    * compacted). Left out, the breakdown's.
    */
   fill?: number | null
+  /** The session's id (`$.session.id()`): SESSION unless given; a /clear or a resume puts another in its place. */
+  sessionId?: string
+  /**
+   * What `$.store` holds, read and written here: a test sees what the plugin
+   * kept, and a start with the same world finds it, as a later session does.
+   */
+  store?: Record<string, unknown>
   /**
    * How the terminal answers a blit: `ok` draws pictures (Ghostty, kitty);
    * `alt` draws the alt instead (the default: a terminal without pictures);
@@ -149,6 +156,11 @@ const BLIT_ANSWERS: Readonly<Record<NonNullable<World['images']>, UiBlitResult>>
   tmuxFix: { deny: 'images are held back by tmux', fix: 'tmux-passthrough' },
   gone: { deny: 'no Image keyed nox is mounted at noxdeck' },
 }
+
+/** A session's id, in the form of one: a free value. */
+export const SESSION = '0b5f7c1e-3a94-4d2b-9c61-7e8f2a4d6b10'
+/** The store key of SESSION's count: the first 16 hex characters of its SHA-256 (`shasum -a 256`), worked out apart from the plugin. */
+export const SESSION_KEY = 'compactions:8f50b9d8c1ec1536'
 
 /** Stands for the engine beneath the plugin; registered before the test's first call on `$`. */
 export function engine(on: On, world: World = {}) {
@@ -205,13 +217,25 @@ export function engine(on: On, world: World = {}) {
   })
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_, e) => ({ text: e.answer }))
-  on('classic.PostToolUseFailure', () => ({}))
+
   on('session.measure', (_, e) => ({ changed: e.changed }))
   on('ui.blit', (_, e) => {
     if ('source' in e) world.blits?.push({ ...e, at: clock.now() })
     return { value: BLIT_ANSWERS[world.images ?? 'alt'] }
   })
   on('settings.read', () => ({ value: world.isMotionReduced === true ? { prefersReducedMotion: true } : {} }))
+  on('session.id', () => ({ value: world.sessionId ?? SESSION }))
+  // The store keeps JSON data, as the engine's does.
+  on('store.get', (_, e) => ({ value: world.store?.[e.key] }))
+  on('store.set', (_, e) => {
+    world.store = { ...world.store, [e.key]: JSON.parse(JSON.stringify(e.value)) }
+    return { value: undefined }
+  })
+  on('store.delete', (_, e) => {
+    world.store = Object.fromEntries(Object.entries(world.store ?? {}).filter(([key]) => key !== e.key))
+    return { value: undefined }
+  })
+  on('store.keys', () => ({ value: Object.keys(world.store ?? {}) }))
   return clock
 }
 
@@ -368,18 +392,37 @@ export const READ_RESULT = { result: { type: 'text', file: { filePath: '/proj/a.
 export const MINUTE = 60_000
 export const HOUR = 60 * MINUTE
 export const ANSWERED = { answer: '', isAborted: false, reason: 'answer' } as const
-const FAILED = { isError: true, result: 'exit 1', text: 'exit 1' } as const
 export const BASH_OK = { result: { stdout: '', stderr: '', interrupted: false } } as const
 
-/**
- * Answers a call as a tool that ran and failed, as the engine reports one:
- * its PostToolUseFailure first (a call refused before its tool ran has
- * none), then the errored result.
- */
-export async function failedRun($: Engine, e: { tool: string; tool_use_id?: string }) {
-  await $.classic.PostToolUseFailure({ tool_name: e.tool, tool_input: {}, tool_use_id: e.tool_use_id ?? '', error: 'exit 1' })
-  return FAILED
-}
+// A tool call's way beneath the plugins is the kit's own core, in the
+// engine's order: classic.PreToolUse, tool.check, for an `ask` the dialog
+// (classic.PermissionRequest), then tool.run for a call that was allowed. A
+// test stands for what is beneath that: `tool.check`'s bottom hook is the
+// engine's verdict, `classic.PermissionRequest`'s the person at the dialog
+// (ALLOWED once they say yes; `{}`, with nobody the kit could ask, is a
+// no), `tool.run`'s the tool itself. noxdeck hooks tool.check, tool.judge
+// and tool.run, and no classic event.
+//
+// Recorded on 18 November 2026 (Claude Code 2.1.327), with no plugin above
+// and under the built-in guard alike: a call's tool.call, its tool.check
+// (`{ decision, reason }`, the input's `approver` `person`), for an `ask`
+// the dialog, then tool.run, whose answer is the call's: `{ ref, result,
+// text }`, and for a Bash command that exits with an error (`ls` of a
+// folder that is not there) `{ isError, isReadOnly, ref, result, text }`.
+// `ref` is core's own; FAILED is that answer without it.
+//
+// Invented: every tool.judge a test raises. None has been recorded: auto
+// mode settled the one command it was given (`touch` in the working
+// folder) with no classifier, and so with no tool.judge.
+
+/** How long an `ask` stands before noxdeck takes it for a person's dialog (ASK_STANDS_MS in hooks/register.tsx). */
+export const STANDS_MS = 1000
+/** The dialog's answer once the person, or a settings hook, allows the call. */
+export const ALLOWED = { decision: { behavior: 'allow' } } as const
+/** The verdict that puts a call to the person. */
+export const ASK = { decision: 'ask' } as const
+/** A run's answer as the engine reports a tool that failed as it ran (a Bash command's exit code 1). */
+export const FAILED = { isError: true, result: 'exit 1', text: 'exit 1' } as const
 
 /** The pane's texts on the terminal at `bodyRows` rows (and `bodyColumns` columns). */
 export async function textsAt($: Engine, bodyRows = 80, bodyColumns = 48): Promise<Found[]> {

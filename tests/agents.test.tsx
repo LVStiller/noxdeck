@@ -4,7 +4,7 @@ import type { AgentInfo, On, TurnStepInput, SiteView, TurnStepResult, TurnUsage,
 import { freshOf, groupsOf, MAX_AGENTS, MAX_OTHER_LOOPS, NO_LEDGER, NO_TALLY, potsOf, processedOf, withAgent, withLedgerStep } from '../hooks/model'
 import { cellsOf, wrappedRows } from '../hooks/view'
 import type { AgentLedger } from '../types'
-import { SURFACES, test, PANE, K, P, engine, start, SPAWN, READ_RESULT, ANSWERED, BASH_OK, failedRun, has } from './helpers'
+import { SURFACES, test, PANE, K, P, engine, start, SPAWN, READ_RESULT, ANSWERED, BASH_OK, FAILED, has } from './helpers'
 import type { Found } from './helpers'
 
 // A workflow agent's first turn as Claude Code 2.1.318 hands it to the hooks:
@@ -195,7 +195,7 @@ describe('Agents: tokens, model and activity per agent', () => {
       expect(has(texts, /^Verarbeitet = Summe aller Schritte, inkl\. Wiederholung aus dem Cache$/)).toBe(true)
       // The CONTEXT card still shows the main chat's window alone.
       await ui.press({ key: 'tab-live' })
-      expect(has(await ui.findAll({ type: 'Text' }), new RegExp(`^ ?${P(58)} · 116k / 200k ?$`))).toBe(true)
+      expect(has(await ui.findAll({ type: 'Text' }), new RegExp(`^ ?${P(58)} · 116k / 200k · 0×( komp\\.)? ?$`))).toBe(true)
       await ui.unmount()
     }
   })
@@ -588,7 +588,7 @@ describe('Agents: tokens, model and activity per agent', () => {
         done('ok', 'prüfen: c'),
       ],
     })
-    on('tool.call', (_, e) => failedRun($, e))
+    on('tool.run', (_, e) => FAILED)
     await start($)
     await $.tool.call({ tool: 'Bash', command: 'npm test', agentId: 'f1' })
     await $.tool.call({ tool: 'Bash', command: 'npm test', agentId: 'f1' })

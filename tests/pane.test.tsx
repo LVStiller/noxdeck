@@ -29,10 +29,18 @@ import {
   MINUTE,
   HOUR,
   ANSWERED,
-  failedRun,
+  FAILED,
   textsAt,
   has,
+  SESSION,
+  SESSION_KEY,
+  ALLOWED,
+  ASK,
+  BASH_OK,
+  posesOver,
+  framesIn,
 } from './helpers'
+import { register } from '../hooks/register'
 import type { World, Found, Size } from './helpers'
 import { GUARD } from './guard'
 import type { PlanStep } from '../types'
@@ -222,8 +230,11 @@ describe('context', () => {
       // 167k, the auto-compact threshold, less the 116k measured: ~51k left. No peak.
       expect(await ui.find({ type: 'Text', text: `Cache Hit ${P(90)} · noch ~51k bis Compact` })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /Peak/ })).toBeUndefined()
-      // Cache hits and compactions count from noxdeck's load: the line says so.
-      expect(await ui.find({ type: 'Text', text: /^0× kompaktiert · seit Laden$/ })).toBeDefined()
+      // The compactions stand in the header, after the fill: the count alone in
+      // the terminal's border, where this width has no room for „komp.“.
+      const header = surface === 'terminal' ? ` ${P(58)} · 116k / 200k · 0× ` : `${P(58)} · 116k / 200k · 0× komp.`
+      expect((await ui.findAll({ type: 'Text' })).some(found => found.text === header)).toBe(true)
+      expect(await ui.find({ type: 'Text', text: /kompaktiert|seit Laden/ })).toBeUndefined()
       expect(await ui.find({ type: 'Text', text: /ⓘ/ })).toBeUndefined()
       expect(await ui.find({ type: 'Text', text: /main loop/ })).toBeUndefined()
       await ui.unmount()
@@ -243,12 +254,11 @@ describe('context', () => {
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
     // Measured at 70k after compacting: ~97k left.
     expect(await ui.find({ type: 'Text', text: `Cache Hit ${P(90)} · noch ~97k bis Compact` })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^1× kompaktiert · seit Laden$/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: `${P(35)} · 70k / 200k` })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: `${P(35)} · 70k / 200k · 1×` })).toBeDefined()
     await ui.unmount()
   })
 
-  test('the stats lines stand right under the growth line, the table of mcp, memory and skills after them', async ($, on) => {
+  test('the card\'s lines in order: the growth line, the table of mcp, memory and skills, the stats last', async ($, on) => {
     engine(on)
     await start($)
     for (const surface of SURFACES) {
@@ -256,11 +266,44 @@ describe('context', () => {
       const texts = (await ui.findAll({ type: 'Text' })).map(found => found.text)
       await ui.unmount()
       // The table's rows by what they name: the legend has an mcp and a memory of its own.
-      const lines = [/^Ø /, /^Cache Hit /, /^\d+× kompaktiert/, /^mcp +\d+ Server/, /^memory +CLAUDE\.md/, /^skills +\d+ gelistet/]
+      const lines = [/^Ø /, /^mcp +\d+ Server/, /^memory +CLAUDE\.md/, /^skills +\d+ gelistet/, /^Cache Hit .* bis Compact$/]
       const order = lines.map(line => texts.findIndex(text => line.test(text)))
       expect(order.every(index => index >= 0)).toBe(true)
       expect(order).toEqual([...order].sort((a, b) => a - b))
     }
+  })
+
+  test('the header holds the fill and the compactions: „komp.“ goes first, then the border\'s dashes, then the header moves into the body', async ($, on) => {
+    engine(on)
+    await start($)
+    const headerAt = async (bodyColumns: number) => {
+      const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns }, surface: 'terminal' })
+      const texts = (await ui.findAll({ type: 'Text' })).map(found => found.text)
+      await ui.unmount()
+      return texts.filter(text => /116k \/ 200k|^\d+×/.test(text))
+    }
+    const fill = `${P(58)} · 116k / 200k`
+    // In the border the text has a space on either side; in the body it has none.
+    expect(await headerAt(80)).toEqual([` ${fill} · 0× komp. `])
+    expect(await headerAt(60)).toEqual([` ${fill} · 0× komp. `])
+    // 50 columns hold title, two dashes and the long form exactly; one less, the count alone.
+    expect(await headerAt(50)).toEqual([` ${fill} · 0× komp. `])
+    expect(await headerAt(49)).toEqual([` ${fill} · 0× `])
+    expect(await headerAt(45)).toEqual([` ${fill} · 0× `])
+    // 44 columns: the count alone with two dashes; 43: with the one dash left; 42: no room in the border.
+    expect(await headerAt(44)).toEqual([` ${fill} · 0× `])
+    expect(await headerAt(43)).toEqual([` ${fill} · 0× `])
+    expect(await headerAt(42)).toEqual([`${fill} · 0× komp.`])
+    // Narrower than the long form: the count alone, on a row of its own where one does not hold both.
+    expect(await headerAt(30)).toEqual([fill, '0×'])
+  })
+
+  test('in English the header says comp.', { options: { language: 'en' } }, async ($, on) => {
+    engine(on)
+    await start($)
+    const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns: 60 }, surface: 'terminal' })
+    expect(await ui.find({ type: 'Text', text: ' 58% · 116k / 200k · 0× comp. ' })).toBeDefined()
+    await ui.unmount()
   })
 
   test('a compaction window set with /autocompact: mark, line, forecast and what is left follow the engine\'s threshold', async ($, on) => {
@@ -309,7 +352,8 @@ describe('context', () => {
       expect(await ui.find({ type: 'Text', text: `${P(52)} · 520k / 1M` })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: P(100).padStart(6) })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: 'Ø n/a/Turn · Auto-Compact aus' })).toBeDefined()
-      expect(await ui.find({ type: 'Text', text: 'Cache Hit n/a · 0× kompaktiert' })).toBeDefined()
+      expect((await ui.findAll({ type: 'Text' })).some(found => found.text === 'Cache Hit n/a')).toBe(true)
+      expect(await ui.find({ type: 'Text', text: `${P(52)} · 520k / 1M · 0× komp.` })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /bis Compact|Peak/ })).toBeUndefined()
       await ui.unmount()
     }
@@ -342,9 +386,9 @@ describe('compactions, counted by the fill a turn or a model request of the main
   /** How many compactions the CONTEXT card counts. */
   const counted = async ($: Engine) => {
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-    const line = await ui.find({ type: 'Text', text: /^\d+× kompaktiert/ })
+    const header = await ui.find({ type: 'Text', text: / · \d+×( komp\.)? ?$/ })
     await ui.unmount()
-    return Number.parseInt(line?.text ?? '', 10)
+    return Number.parseInt(/ · (\d+)×/.exec(header?.text ?? '')?.[1] ?? '', 10)
   }
   const TOKENS: TurnUsage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: 'claude-sonnet-5-5' }
 
@@ -521,6 +565,221 @@ describe('compactions, counted by the fill a turn or a model request of the main
     await request($, 0, 20, 49_611)
     expect(await counted($)).toBe(2)
   })
+
+  test('a window that has a fill as noxdeck loads and is compacted while idle counts with the next turn; a fresh one counts nothing', async ($, on) => {
+    // Seen on 17 November 2026 (noxdeck 1.1.1): /reload-plugins, then no prompt,
+    // „Compacted while idle“, a prompt hours later; the pane said 326k before
+    // and 69k after, and 1.1.1 counted nothing: no look had found the fill
+    // since the load. The figures are the pane's, rounded.
+    const world: World = { fill: 326_000, window: 1000 * K }
+    engine(on, world)
+    const request = session(on, world)
+    await start($)
+    world.fill = null
+    await turn($, 't1')
+    expect(await counted($)).toBe(1)
+    await request($, 0, 20, 69_000)
+    expect(await counted($)).toBe(1)
+  })
+
+  test('a fresh session, with no fill as noxdeck loads, counts nothing at its first turn', async ($, on) => {
+    const world: World = { fill: null }
+    engine(on, world)
+    const request = session(on, world)
+    await start($)
+    await turn($, 't1')
+    await request($, 0, 14, 47_664)
+    expect(await counted($)).toBe(0)
+    expect(world.store ?? {}).toEqual({})
+  })
+
+  test('once a compaction is counted the header shows the estimate, with ≈, beside the new count; the next measurement is plain again', async ($, on) => {
+    // The breakdown's estimates: 116k before the compaction, 69k after it.
+    const world: World = { fill: 116 * K, messages: [76 * K, 29 * K] }
+    engine(on, world)
+    await start($)
+    const header = async () => {
+      const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns: 60 }, surface: 'terminal' })
+      const found = await ui.find({ type: 'Text', text: / · \d+× komp\. $/ })
+      await ui.unmount()
+      return found?.text
+    }
+    expect(await header()).toBe(` ${P(58)} · 116k / 200k · 0× komp. `)
+    // The compaction leaves no measured fill; the next turn's start counts it and reads the window anew.
+    world.fill = null
+    world.hasResponse = false
+    await turn($, 't1')
+    expect(await header()).toBe(` ≈${P(35)} · ≈69k / 200k · 1× komp. `)
+    // That turn's response is measured: 70k, the status line's figure.
+    world.hasResponse = true
+    world.messages = [30 * K]
+    await $.session.measure({ context: { window: 200 * K, tokens: 70 * K, percent: 35 }, rateLimits: [], changed: ['context'] })
+    expect(await header()).toBe(` ${P(35)} · 70k / 200k · 1× komp. `)
+  })
+
+  // What follows keeps the count by conversation. The session ids are free
+  // values in the form of one; each store key is the first 16 hex characters
+  // of its id's SHA-256 (`shasum -a 256`), worked out apart from the plugin.
+  const OTHER = '9d2e4f60-1b7a-4c85-a3f2-5c6e8b0d1f27'
+  const OTHER_KEY = 'compactions:6d01b3544c8b0d56'
+  /** A compaction, and the main loop's next turn finding the fill gone. */
+  const compactedBefore = async ($: Engine, world: World, turnId: string) => {
+    world.fill = null
+    await turn($, turnId)
+  }
+
+  test('the store holds one entry for the conversation: a short hash of its id, the count and a time, and the id nowhere', async ($, on) => {
+    const world: World = { fill: 47_664 }
+    const clock = engine(on, world)
+    const request = session(on, world)
+    await start($)
+    expect(world.store ?? {}).toEqual({})
+    await compactedBefore($, world, 't1')
+    expect(world.store).toEqual({ [SESSION_KEY]: { count: 1, at: clock.now() } })
+    await request($, 0, 20, 49_611)
+    await clock.advance(5000)
+    await compactedBefore($, world, 't2')
+    expect(world.store).toEqual({ [SESSION_KEY]: { count: 2, at: clock.now() } })
+    // Neither the id nor a piece of it a hash would not hide.
+    const kept = JSON.stringify(world.store)
+    expect(kept.includes(SESSION)).toBe(false)
+    for (const piece of SESSION.split('-')) expect(kept.includes(piece)).toBe(false)
+    expect(SESSION_KEY).toMatch(/^compactions:[0-9a-f]{16}$/)
+  })
+
+  test('a conversation taken up again counts on (--continue, --resume): a later session with the same id finds its count', async ($, on) => {
+    // The store as an earlier session of this conversation left it: two compactions.
+    const world: World = { fill: 141_262, store: { [SESSION_KEY]: { count: 2, at: 400_000 } } }
+    const clock = engine(on, world)
+    const request = session(on, world)
+    await start($)
+    expect(await counted($)).toBe(2)
+    // Taken up, the entry is new again.
+    expect(world.store).toEqual({ [SESSION_KEY]: { count: 2, at: clock.now() } })
+    await request($, 0, 53, 142_955)
+    await compactedBefore($, world, 't2')
+    expect(await counted($)).toBe(3)
+    expect(world.store).toEqual({ [SESSION_KEY]: { count: 3, at: clock.now() } })
+  })
+
+  test('a new conversation starts at 0, whatever the store keeps for others, and leaves their entries as they are', async ($, on) => {
+    const world: World = { fill: 47_664, sessionId: OTHER, store: { [SESSION_KEY]: { count: 2, at: 900_000 } } }
+    engine(on, world)
+    await start($)
+    expect(await counted($)).toBe(0)
+    expect(world.store).toEqual({ [SESSION_KEY]: { count: 2, at: 900_000 } })
+    await compactedBefore($, world, 't1')
+    expect(await counted($)).toBe(1)
+    expect(world.store).toEqual({ [SESSION_KEY]: { count: 2, at: 900_000 }, [OTHER_KEY]: { count: 1, at: 1_000_000 } })
+  })
+
+  test('/clear starts at 0 under the new id; /resume takes up the count of the conversation it returns to', async ($, on) => {
+    const world: World = { fill: 47_664 }
+    const clock = engine(on, world)
+    const request = session(on, world)
+    on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+    await start($)
+    await compactedBefore($, world, 't1')
+    await request($, 0, 20, 49_611)
+    expect(await counted($)).toBe(1)
+    // /clear: the process goes on under another id (the types'), and no session.start fires.
+    await $.session.end({ reason: 'clear', sessionId: SESSION, resume: { id: SESSION } })
+    world.sessionId = OTHER
+    world.fill = null
+    await clock.advance(1000)
+    expect(await counted($)).toBe(0)
+    await turn($, 't2')
+    await request($, 0, 14, 20_000)
+    expect(await counted($)).toBe(0)
+    await compactedBefore($, world, 't3')
+    expect(await counted($)).toBe(1)
+    expect(world.store).toMatchObject({ [SESSION_KEY]: { count: 1 }, [OTHER_KEY]: { count: 1 } })
+    await request($, 0, 14, 21_000)
+    await compactedBefore($, world, 't4')
+    expect(await counted($)).toBe(2)
+    // /resume, back to the first conversation: its one compaction, not the other's two.
+    await $.session.end({ reason: 'resume', sessionId: OTHER, resume: { id: OTHER } })
+    world.sessionId = SESSION
+    world.fill = 49_611
+    await clock.advance(1000)
+    expect(await counted($)).toBe(1)
+    expect(world.store).toMatchObject({ [SESSION_KEY]: { count: 1 }, [OTHER_KEY]: { count: 2 } })
+  })
+
+  test('a prompt right after /clear, before the pane has read the new conversation, still counts under the new id', async ($, on) => {
+    const world: World = { fill: 47_664 }
+    engine(on, world)
+    const request = session(on, world)
+    on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+    await start($)
+    await compactedBefore($, world, 't1')
+    await request($, 0, 20, 49_611)
+    await $.session.end({ reason: 'clear', sessionId: SESSION, resume: { id: SESSION } })
+    world.sessionId = OTHER
+    world.fill = null
+    // Invented: a turn and a compaction within the second the pane waits before it reads the new window.
+    await turn($, 't2')
+    await request($, 0, 14, 20_000)
+    await compactedBefore($, world, 't3')
+    expect(await counted($)).toBe(1)
+    expect(world.store).toMatchObject({ [SESSION_KEY]: { count: 1 }, [OTHER_KEY]: { count: 1 } })
+  })
+
+  test('a count 1.1.1 kept in $.state alone moves into the store at the first start of 1.1.2 (/reload-plugins after the update)', async ($, on) => {
+    // What 1.1.1 wrote: the usage track in the shape it still has, two compactions since its load.
+    const stored = { shape: 'noxdeck/7', value: { history: [], compactions: 2, cacheRead: 0, inputTotal: 0 } }
+    const world: World = { fill: 141_262 }
+    const clock = engine(on, world)
+    on('state.get', { plugin: 'noxdeck', key: 'usage' }, () => ({ value: { value: stored, version: 1 } }) as never)
+    await start($)
+    expect(await counted($)).toBe(2)
+    expect(world.store).toEqual({ [SESSION_KEY]: { count: 2, at: clock.now() } })
+  })
+
+  const DAY = 24 * HOUR
+  const entry = (n: number) => `compactions:${String(n).padStart(16, '0')}`
+
+  test('the store is tidied at the start: an entry not written for more than 30 days goes, and one that is no count; this conversation\'s and other keys stay', async ($, on) => {
+    const now = 100 * DAY
+    const world: World = {
+      fill: 47_664,
+      store: {
+        // Old, and this conversation's: taken up, so it stays and is new again.
+        [SESSION_KEY]: { count: 4, at: now - 40 * DAY },
+        [entry(1)]: { count: 1, at: now - 30 * DAY - 1 },
+        [entry(2)]: { count: 1, at: now - 30 * DAY },
+        // Not a count: removed. A key of another kind: left alone.
+        [entry(3)]: 'x',
+        other: { kept: true },
+      },
+    }
+    const clock = engine(on, world)
+    await clock.set(now)
+    await start($)
+    expect(world.store).toEqual({
+      [SESSION_KEY]: { count: 4, at: now },
+      [entry(2)]: { count: 1, at: now - 30 * DAY },
+      other: { kept: true },
+    })
+  })
+
+  test('the store keeps the newest 50 counts: of sixty-one, the eleven written longest ago go', async ($, on) => {
+    const now = 100 * DAY
+    const store: Record<string, unknown> = {}
+    // Sixty, a minute apart, the higher the newer; this conversation's makes sixty-one, and none is old.
+    for (let n = 100; n < 160; n += 1) store[entry(n)] = { count: 1, at: now - (160 - n) * MINUTE }
+    const world: World = { fill: 47_664, store: { ...store, [SESSION_KEY]: { count: 4, at: now - DAY } } }
+    const clock = engine(on, world)
+    await clock.set(now)
+    await start($)
+    const counts = Object.keys(world.store ?? {}).filter(key => key.startsWith('compactions:'))
+    // This conversation's, taken up, and the 49 newest of the sixty.
+    expect(counts.length).toBe(50)
+    expect(counts.includes(SESSION_KEY)).toBe(true)
+    expect(counts.includes(entry(110))).toBe(false)
+    expect(counts.includes(entry(111))).toBe(true)
+    expect(counts.includes(entry(159))).toBe(true)
+  })
 })
 
 describe('status', () => {
@@ -529,13 +788,13 @@ describe('status', () => {
     const clock = engine(on, { rateLimits: [{ kind: 'five_hour', percentUsed: 30 }] })
     // While the Edit runs beneath the plugin, the pane already says so.
     const editingSeen: (string | undefined)[] = []
-    on('tool.call', async (_, e) => {
+    on('tool.run', async (_, e) => {
       const ui = await outer.ui.mount({ ...PANE, surface: 'terminal' })
       // The STATUS card's line (JETZT lists the call itself as `✎ Edit …`).
       const line = await ui.find({ type: 'Text', text: /^✎ (bearbeitet|noch)/ })
       editingSeen.push(`${line?.text} ${String(line?.props.color)}`)
       await ui.unmount()
-      if (e.tool === 'Bash') return failedRun(outer, e)
+      if (e.tool === 'Bash') return FAILED
       return { result: { filePath: '/proj/src/Toggle.tsx', structuredPatch: [], originalFile: '' } }
     })
     await start($)
@@ -783,37 +1042,92 @@ describe('changes', () => {
 })
 
 describe('observer', () => {
-  test('the permission hooks and agent.spawn pass their events on unchanged and what answered them back as it came', async ($, on) => {
+  test('tool.check hands back the verdict it heard, whole and unchanged, for allow, ask and deny', async ($, on) => {
     engine(on)
     const seen: unknown[] = []
-    const verdict = { decision: 'deny' as const, reason: 'Bash(rm:*) is denied' }
-    const decided = { decision: { behavior: 'allow' as const } }
-    const spawned = { model: 'm', agentId: 'a1' }
-    on('tool.check', (_, e) => (seen.push(e), verdict))
-    on('classic.PermissionRequest', (_, e) => (seen.push(e), decided))
-    on('classic.PermissionDenied', (_, e) => (seen.push(e), {}))
-    on('agent.spawn', (_, e) => (seen.push(e), spawned))
+    // Each with the fields a verdict of the engine's can carry (the types'), so one added, dropped or changed shows.
+    const verdicts = {
+      allow: { decision: 'allow', reason: 'Bash(ls:*) is allowed', rule: 'Bash(ls:*)' },
+      ask: { decision: 'ask', reason: 'reads outside the working directories', hook: 'PreToolUse', setting: 'permissions.blockReadsOutsideWorkingDirectories' },
+      deny: { decision: 'deny', reason: 'Bash(rm:*) is denied', rule: 'Bash(rm:*)' },
+    } as const
+    type Want = keyof typeof verdicts
+    on('tool.check', (_, e) => (seen.push(e), verdicts[(e.input as { want: Want }).want]))
     await start($)
-    const check = { tool: 'Bash', input: { command: 'rm -rf /' }, tool_use_id: 'tu-1' }
-    const request = { tool_name: 'Bash', tool_input: { command: 'ls' } }
-    const denied = { tool_name: 'Bash', tool_input: { command: 'rm x' }, tool_use_id: 'tu-3', reason: 'auto mode' }
-    const spawn = { ...SPAWN, description: 'look around' }
-    expect(await $.tool.check(check as never)).toEqual(verdict)
-    expect(await $.classic.PermissionRequest(request)).toEqual(decided)
-    expect(await $.classic.PermissionDenied(denied)).toEqual({})
-    expect(await $.agent.spawn(spawn)).toEqual(spawned)
-    for (const [i, sent] of [check, request, denied, spawn].entries()) expect(seen[i]).toMatchObject(sent)
+    for (const want of ['allow', 'ask', 'deny'] as const) {
+      const check = { tool: 'Bash', input: { want }, tool_use_id: `tu-${want}` }
+      // The hook returns the very object `next(e)` resolved to. The kit hands an answer on as a copy,
+      // so what can be compared here is the value: every field, and no other.
+      const got = await $.tool.check(check as never)
+      expect(got).toEqual(verdicts[want])
+      expect(Object.keys(got).sort()).toEqual(Object.keys(verdicts[want]).sort())
+      expect(seen.at(-1)).toMatchObject(check)
+    }
   })
 
-  test('a PreToolUse hook beneath hears the call as it came', async ($, on) => {
+  test('tool.judge, tool.run and agent.spawn pass their events on unchanged and what answered them back as it came', async ($, on) => {
     engine(on)
     const seen: unknown[] = []
-    on('classic.PreToolUse', (_, e) => (seen.push(e), {}))
-    on('tool.call', () => ({ result: { stdout: '', stderr: '', interrupted: false } }))
+    // The run's answer is a recorded one's (18 November 2026, Claude Code 2.1.327), without core's `ref`.
+    // Invented: the tool.judge, its input and answer the types'; none has been recorded.
+    const judged = { decision: 'allow' as const, reason: 'a read in the working directory' }
+    const ran = { result: { stdout: 'ok', stderr: '', interrupted: false } }
+    const spawned = { model: 'm', agentId: 'a1' }
+    on('tool.judge', (_, e) => (seen.push(e), judged))
+    on('tool.run', (_, e) => (seen.push(e), ran))
+    on('agent.spawn', (_, e) => (seen.push(e), spawned))
     await start($)
-    await $.tool.call({ tool: 'Bash', command: 'curl -sSL https://example.com/data.json', tool_use_id: 'tu-2' })
-    expect(seen).toEqual([{ tool: 'Bash', command: 'curl -sSL https://example.com/data.json', tool_use_id: 'tu-2' }])
+    const judge = { tool: 'Bash', input: { command: 'ls' }, tool_use_id: 'tu-1' }
+    const run = { tool: 'Bash', command: 'ls', tool_use_id: 'tu-1' }
+    const spawn = { ...SPAWN, description: 'look around' }
+    expect(await $.tool.judge(judge as never)).toEqual(judged)
+    expect(await $.tool.run(run as never)).toEqual(ran)
+    expect(await $.agent.spawn(spawn)).toEqual(spawned)
+    for (const [i, sent] of [judge, run, spawn].entries()) expect(seen[i]).toMatchObject(sent)
   })
+
+  test('no classic event is hooked: the built-in guard has nothing of noxdeck\'s to send past it', () => {
+    const hooked: string[] = []
+    register(((event: string) => void hooked.push(event)) as never, {} as never)
+    expect(hooked.filter(event => event.startsWith('classic.'))).toEqual([])
+    // What tells a dialog, the classifier and a run in their place.
+    for (const event of ['tool.call', 'tool.check', 'tool.judge', 'tool.run']) expect(hooked.includes(event)).toBe(true)
+    expect(hooked.includes('session.compact')).toBe(false)
+  })
+
+  for (const [where, above] of [['with no plugin above', {}], ['under Claude Code\'s built-in guard', { plugins: [GUARD] }]] as const) {
+    test(`${where}: a failing command counts in RADAR and startles Nox; a call put to the person says „braucht deine Freigabe“ and counts its wait`, above, async ($, on) => {
+      const clock = engine(on)
+      const outer = $
+      const captions: (string | undefined)[] = []
+      // The two commands as recorded under the guard on 18 November 2026 (Claude Code 2.1.327, manual
+      // mode): each was asked about (tool.check: ask). `ls` of a folder that is not there was allowed
+      // after 14.381 s and its run came back errored; `touch` was allowed after 9.707 s and ran.
+      on('tool.check', () => ASK)
+      on('classic.PermissionRequest', async (_, e) => {
+        await clock.advance((e.tool_input as { command: string }).command.startsWith('ls ') ? 14_381 : 9_707)
+        const ui = await outer.ui.mount({ ...PANE, surface: 'terminal' })
+        captions.push((await captionOf(ui))?.text)
+        await ui.unmount()
+        return ALLOWED
+      })
+      on('tool.run', (_, e) => (e.tool_use_id === 'tu-ls' ? { ...FAILED, isReadOnly: true as const } : BASH_OK))
+      await start($)
+      await $.turn.start({ text: '', turnId: 't1' })
+      await $.tool.call({ tool: 'Bash', command: 'ls /nicht-vorhanden-noxdeck', tool_use_id: 'tu-ls' })
+      expect(framesIn(await posesOver($, clock, 1000))).toContain('startled')
+      const failed = await textsAt($)
+      expect(has(failed, /^Fehler 1 · zuletzt Bash gerade eben$/)).toBe(true)
+      expect(has(failed, /^Wartezeit 0:14 · 1 Freigabe$/)).toBe(true)
+      await $.tool.call({ tool: 'Bash', command: 'touch freigabe-test.txt', tool_use_id: 'tu-touch' })
+      expect(captions).toEqual(['braucht deine Freigabe', 'braucht deine Freigabe'])
+      // The waits to the moments the calls were allowed, exact (24.088 s as recorded); two approvals; still one failure.
+      const texts = await textsAt($)
+      expect(has(texts, /^Wartezeit 0:24 · 2 Freigaben$/)).toBe(true)
+      expect(has(texts, /^Fehler 1 · /)).toBe(true)
+    })
+  }
+
 
   test('tool calls and compactions pass through unchanged, results come back as answered', async ($, on) => {
     engine(on)
@@ -960,8 +1274,10 @@ describe('edge cases', () => {
     engine(on)
     await start($)
     const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns: 30 }, surface: 'terminal' })
-    expect(await ui.find({ type: 'Text', text: ` ${P(58)} · 116k / 200k ` })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: ` ${P(58)} · 116k / 200k` })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: `${P(58)} · 116k / 200k` })).toBeDefined()
+    // The compactions move with the fill: the count alone, on the row under it.
+    expect((await ui.findAll({ type: 'Text' })).some(found => found.text === '0×')).toBe(true)
     await ui.unmount()
   })
 
@@ -1255,14 +1571,15 @@ describe('state written by an older version (hot reload, /reload-plugins)', () =
     await start($)
     const stats = async () => {
       const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-      const lines = (await ui.findAll({ type: 'Text', text: /^(Cache Hit|\d+× kompaktiert)/ })).map(found => found.text)
+      // The stats line, last on the card, then the header (the estimate and the count): the border's texts are drawn after the card's.
+      const lines = (await ui.findAll({ type: 'Text', text: /^Cache Hit| · \d+× $/ })).map(found => found.text)
       await ui.unmount()
       return lines
     }
     // The breakdown's estimate, 116k, against the 167k threshold either way; the count tells which track was read.
-    expect(await stats()).toEqual(['Cache Hit n/a · noch ~51k bis Compact', '0× kompaktiert · seit Laden'])
+    expect(await stats()).toEqual(['Cache Hit n/a · noch ~51k bis Compact', ` ≈${P(58)} · ≈116k / 200k · 0× `])
     stored = { shape: 'noxdeck/7', value: kept }
-    expect(await stats()).toEqual(['Cache Hit n/a · noch ~51k bis Compact', '2× kompaktiert · seit Laden'])
+    expect(await stats()).toEqual(['Cache Hit n/a · noch ~51k bis Compact', ` ≈${P(58)} · ≈116k / 200k · 2× `])
   })
 })
 
@@ -1469,9 +1786,9 @@ describe('the limit STATUS shows: the 5h window, else the week\'s for all models
           await ui.unmount()
         }
       }
-      // A row less: Nox shows from 30 rows, one fewer than with a limit line.
-      expect(owlOf(await shownPose($, 'terminal', { rows: 30, columns: 48 }))).toBe('nox')
-      expect(owlOf(await shownPose($, 'terminal', { rows: 29, columns: 48 }))).toBe('mini')
+      // A row less: Nox shows from 29 rows, one fewer than with a limit line.
+      expect(owlOf(await shownPose($, 'terminal', { rows: 29, columns: 48 }))).toBe('nox')
+      expect(owlOf(await shownPose($, 'terminal', { rows: 28, columns: 48 }))).toBe('mini')
     })
 
     test(`${language}: each measurement picks the window anew: none, the week's, the 5h, none again`, { options }, async ($, on) => {
@@ -1602,7 +1919,7 @@ describe('the Live tab', () => {
 describe('the Live tab when the pane is short', () => {
   test('Nox goes first, STATUS keeps its lines; then RADAR loses its last rows; the loop warning stays on top', async ($, on) => {
     engine(on, TWO_LINES)
-    on('tool.call', (_, e) => (e.tool === 'Bash' ? failedRun($, e) : READ_RESULT))
+    on('tool.run', (_, e) => (e.tool === 'Bash' ? FAILED : READ_RESULT))
     await start($)
     await $.turn.start({ text: '', turnId: 't1' })
     await $.tool.call({ tool: 'Read', file_path: '/proj/src/a.ts' })
@@ -1610,7 +1927,7 @@ describe('the Live tab when the pane is short', () => {
     // RADAR: the warning (two rows at this width), the failures, the hotspots, in its frame: 6 rows.
     // STATUS: the warning, the edit line, the limit, the caption in its frame: 7 rows, 13 with Nox;
     // with the mini owl beside the two lines instead of the caption, 7 as well.
-    // The pane's frame takes 4, CONTEXT 15.
+    // The pane's frame takes 4, CONTEXT 14.
     const at = async (rows: number) => {
       const texts = await textsAt($, rows)
       return {
@@ -1621,13 +1938,13 @@ describe('the Live tab when the pane is short', () => {
         hasCaption: has(texts, MOOD),
       }
     }
-    expect(await at(38)).toEqual({ owl: 'nox', hasErrors: true, hasHotspots: true, isWarningFirst: true, hasCaption: true })
-    expect(await at(37)).toEqual({ owl: 'mini', hasErrors: true, hasHotspots: true, isWarningFirst: true, hasCaption: false })
-    expect(await at(32)).toEqual({ owl: 'mini', hasErrors: true, hasHotspots: true, isWarningFirst: true, hasCaption: false })
-    expect(await at(31)).toEqual({ owl: 'mini', hasErrors: true, hasHotspots: false, isWarningFirst: true, hasCaption: false })
-    expect(await at(30)).toEqual({ owl: 'mini', hasErrors: false, hasHotspots: false, isWarningFirst: true, hasCaption: false })
+    expect(await at(37)).toEqual({ owl: 'nox', hasErrors: true, hasHotspots: true, isWarningFirst: true, hasCaption: true })
+    expect(await at(36)).toEqual({ owl: 'mini', hasErrors: true, hasHotspots: true, isWarningFirst: true, hasCaption: false })
+    expect(await at(31)).toEqual({ owl: 'mini', hasErrors: true, hasHotspots: true, isWarningFirst: true, hasCaption: false })
+    expect(await at(30)).toEqual({ owl: 'mini', hasErrors: true, hasHotspots: false, isWarningFirst: true, hasCaption: false })
+    expect(await at(29)).toEqual({ owl: 'mini', hasErrors: false, hasHotspots: false, isWarningFirst: true, hasCaption: false })
     // No room for one RADAR row: no card at all, STATUS and CONTEXT whole.
-    const none = await textsAt($, 28)
+    const none = await textsAt($, 27)
     expect(has(none, /^ RADAR $/)).toBe(false)
     expect(has(none, /^ CONTEXT $/) && has(none, /^ STATUS $/)).toBe(true)
   })
@@ -1637,9 +1954,9 @@ describe('the Live tab when the pane is short', () => {
     on('tool.call', (_, e) => ({ result: { oldTodos: [], newTodos: e.tool === 'TodoWrite' ? e.todos : [] } }))
     await start($)
     await $.tool.call({ tool: 'TodoWrite', todos: [...TODOS] })
-    // PLAN: four steps in its frame, 6 rows; STATUS without Nox 5; frame 4; CONTEXT 15.
-    expect(has(await textsAt($, 30), /^Read the styles$/)).toBe(true)
-    const short = await textsAt($, 29)
+    // PLAN: four steps in its frame, 6 rows; STATUS without Nox 5; frame 4; CONTEXT 14.
+    expect(has(await textsAt($, 29), /^Read the styles$/)).toBe(true)
+    const short = await textsAt($, 28)
     expect(has(short, /^Wiring it into the header$/)).toBe(true)
     expect(has(short, /^Run the tests$/)).toBe(true)
     expect(has(short, /^Read the styles$/)).toBe(false)

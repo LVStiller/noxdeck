@@ -250,7 +250,7 @@ export const ENDS_AT_ANSWER: ReadonlySet<string> = new Set(['ExitPlanMode', 'Edi
 /**
  * The cues with `asking` as given. The time any approval dialog stood open is
  * summed over the union of their spans; `isApprox` marks a span that ended
- * with its call, after the tool had run.
+ * with its call, after a tool had run that was not heard to start.
  */
 export function withAsking(cues: Cues, asking: Ask[], at: number, isApprox = false): Cues {
   const wasOpen = cues.asking.some(isApproval)
@@ -263,6 +263,20 @@ export function withAsking(cues: Cues, asking: Ask[], at: number, isApprox = fal
   }
   return { ...cues, asking, isWaitApprox }
 }
+
+/**
+ * The cues without the ask of call `id`, as if it had never opened: for an
+ * approval one fewer counted and no wait summed (auto mode's classifier
+ * took the ask, no person).
+ */
+export function withAskWithdrawn(cues: Cues, id: string): Cues {
+  const ask = cues.asking.find(one => one.id === id)
+  if (ask === undefined) return cues
+  const asking = cues.asking.filter(one => one !== ask)
+  if (!isApproval(ask)) return { ...cues, asking }
+  return { ...cues, asking, approvals: Math.max(0, cues.approvals - 1), waitingSince: asking.some(isApproval) ? cues.waitingSince : null }
+}
+
 
 /** How long approval dialogs have stood open by `at`, the one open now included. */
 export const waitedOf = (cues: Cues, at: number): number =>

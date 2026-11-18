@@ -2,7 +2,7 @@ import { describe, expect } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { AgentInfo, On, SessionRateLimit } from 'claude-code'
 import { cellsOf } from '../hooks/view'
-import { BAR, engine, failedRun, K, PANE, READ_RESULT, SPAWN, start, SURFACES, test, TODOS } from './helpers'
+import { ASK, BAR, engine, FAILED, K, STANDS_MS, PANE, READ_RESULT, SPAWN, start, SURFACES, test, TODOS } from './helpers'
 import type { World } from './helpers'
 
 // The pane seated inline above the prompt. What the engine takes around the
@@ -109,7 +109,8 @@ async function live($: Engine, terminal: number, bodyRows = 12, isFullscreen = t
 /** Two columns as a side-by-side row: `left` in its cells, then `right`. */
 const beside = (left: string, cells: number, right: string) => `${left.padEnd(cells)}${right}`
 /** The columns' title row: CONTEXT and its fill in `width` cells. */
-const contextHead = (width: number) => `CONTEXT${'58 % · 116k / 200k'.padStart(width - 7)}`
+/** CONTEXT's title row beside STATUS: the fill and the compactions, `komp.` where the row has the cells for it. */
+const contextHead = (width: number) => `CONTEXT${(width >= 37 ? '58 % · 116k / 200k · 0× komp.' : '58 % · 116k / 200k · 0×').padStart(width - 7)}`
 
 /** A reset time as a local date: Wednesday, November 11, 2026 at `hours`:`minutes`. */
 const wednesday = (hours: number, minutes: number) => new Date(2026, 10, 11, hours, minutes).toISOString()
@@ -132,8 +133,8 @@ const GROWTH_SHORT = 'Ø +14k/Turn · Compact ~4 Turns'
 async function session($: Engine, on: On, world: World = {}, isFullscreen = true) {
   const limits = world.rateLimits ?? [WEEK]
   const clock = engine(on, { messages: [76 * K, 76 * K, 62 * K, 76 * K], ...world, rateLimits: limits })
-  on('tool.call', (_, e) => {
-    if (e.tool === 'Bash') return failedRun($, e)
+  on('tool.run', (_, e) => {
+    if (e.tool === 'Bash') return FAILED
     if (e.tool === 'TodoWrite') return { result: { oldTodos: [], newTodos: e.todos } }
     return e.tool === 'Edit' ? { result: { filePath: e.file_path, structuredPatch: [], originalFile: 'x' } } : READ_RESULT
   })
@@ -495,17 +496,25 @@ describe('what does not fit is cut visibly', () => {
   })
 
   test('an approval waits in the accent, in both views', async ($, on) => {
-    on('classic.PermissionRequest', () => ({}))
-    await session($, on)
-    await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'x' } })
+    const outer = $
     const accent = async (terminal: number) => {
-      const ui = await $.ui.mount({ ...inline(terminal), surface: 'terminal' })
+      const ui = await outer.ui.mount({ ...inline(terminal), surface: 'terminal' })
       const texts = await ui.findAll({ type: 'Text' })
       await ui.unmount()
       return texts.some(found => found.props.color === 'claude' && /Freigabe/.test(String((found as unknown as { text: string }).text)))
     }
-    expect(await accent(60)).toBe(true)
-    expect(await accent(100)).toBe(true)
+    let seen: boolean[] = []
+    const clocks: { advance: (ms: number) => Promise<void> }[] = []
+    // The check puts the call to the person; once the dialog has stood a second, both views say so.
+    on('tool.check', () => ASK)
+    on('classic.PermissionRequest', async () => {
+      await clocks[0]?.advance(STANDS_MS)
+      seen = [await accent(60), await accent(100)]
+      return {}
+    })
+    clocks.push(await session($, on))
+    await $.tool.call({ tool: 'Bash', command: 'x', tool_use_id: 'tu-1' })
+    expect(seen).toEqual([true, true])
   })
 })
 
