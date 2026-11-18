@@ -2,7 +2,7 @@ import { describe, expect } from 'claude-code/testing'
 import { callKey, callLabel, hotspotsOf, NO_RADAR, normalizedCommand, resetClockOf, withFailure, withFileUses } from '../hooks/radar'
 import { MASK, maskSecrets } from '../hooks/secrets'
 import { wrappedRows } from '../hooks/view'
-import { SURFACES, test, PANE, engine, start, SPAWN, captionOf, READ_RESULT, MINUTE, ANSWERED, BASH_OK, FAILED, ALLOWED, ASK, textsAt, has } from './helpers'
+import { SURFACES, test, PANE, engine, start, SPAWN, captionOf, READ_RESULT, MINUTE, ANSWERED, BASH_OK, FAILED, ALLOWED, ASK, STANDS_MS, textsAt, has } from './helpers'
 import { RUN_UNHEARD } from './guard'
 import type { Found } from './helpers'
 
@@ -261,7 +261,7 @@ describe('RADAR', () => {
     expect(await row()).toBe('Wartezeit 1:00 · 3 Freigaben')
   })
 
-  test('the wait: a dialog a hook decided counts as one, its wait none; a refused one waited until the refusal', async ($, on) => {
+  test('the wait: an ask a hook settles at once is no dialog and counts none; a refused one waited until the refusal', async ($, on) => {
     const clock = engine(on)
     on('tool.check', () => ASK)
     on('classic.PermissionRequest', async (_, e) => {
@@ -275,9 +275,9 @@ describe('RADAR', () => {
     await $.turn.start({ text: '', turnId: 't1' })
     const row = async () => (await textsAt($)).find(found => /^Wartezeit /.test(found.text))?.text
     await $.tool.call({ tool: 'Bash', command: 'auto', tool_use_id: 'tu-auto' })
-    expect(await row()).toBe('Wartezeit 0:00 · 1 Freigabe')
+    expect(await row()).toBeUndefined()
     expect((await $.tool.call({ tool: 'Bash', command: 'npm run dev', tool_use_id: 'tu-dev' })).isError).toBe(true)
-    expect(await row()).toBe('Wartezeit 1:10 · 2 Freigaben')
+    expect(await row()).toBe('Wartezeit 1:10 · 1 Freigabe')
   })
 
   test('where a call ran and was never heard to start, its dialog ends with the call: the wait is approximate, the run in it', { plugins: [RUN_UNHEARD] }, async ($, on) => {
@@ -296,6 +296,128 @@ describe('RADAR', () => {
     await $.tool.call({ tool: 'Bash', command: 'just build', tool_use_id: 'tu-build' })
     expect((await textsAt($)).find(found => /^Wartezeit /.test(found.text))?.text).toBe('Wartezeit ≈1:10 · 1 Freigabe')
     // An Edit ends as its dialog is answered: nothing to add, so no ≈ for it.
+  })
+
+  describe('an ask is a dialog once it has stood a second', () => {
+    /** What the pane says of approvals now: Nox's caption, and RADAR's wait row. */
+    const shown = async ($: Engine) => {
+      const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+      const said = { caption: (await captionOf(ui))?.text, wait: (await ui.find({ type: 'Text', text: /^Wartezeit / }))?.text }
+      await ui.unmount()
+      return said
+    }
+
+    test('auto mode settling an ask in 0.48 s, with no tool.judge: no cue while it stands, no approval counted', async ($, on) => {
+      const clock = engine(on)
+      const outer = $
+      const during: unknown[] = []
+      // Recorded on 18 November 2026 (Claude Code 2.1.327, auto mode, `touch` in the working folder):
+      // tool.check said `ask`, tool.run came 0.48 s later, and no tool.judge between.
+      on('tool.check', () => ASK)
+      on('classic.PermissionRequest', async () => {
+        await clock.advance(479)
+        during.push(await shown(outer))
+        await clock.advance(1)
+        return ALLOWED
+      })
+      on('tool.run', async () => {
+        // The command runs on past the second: still no dialog.
+        await clock.advance(2000)
+        during.push(await shown(outer))
+        return BASH_OK
+      })
+      await start($)
+      await $.turn.start({ text: '', turnId: 't1' })
+      await $.tool.call({ tool: 'Bash', command: 'touch auto-test.txt', tool_use_id: 'tu-touch' })
+      expect(during).toEqual([{ caption: 'arbeitet …', wait: undefined }, { caption: 'arbeitet …', wait: undefined }])
+      expect((await shown($)).wait).toBeUndefined()
+    })
+
+    test('the two dialogs of 14.4 s and 9.7 s: the cue comes as each has stood a second, each counts one approval, the wait runs from the ask', async ($, on) => {
+      const clock = engine(on)
+      const outer = $
+      const seen: unknown[] = []
+      // Recorded on 18 November 2026 (Claude Code 2.1.327, manual mode, under the built-in guard):
+      // `ls` was allowed 14.381 s after its check said `ask`, `touch` 9.707 s after its own.
+      on('tool.check', () => ASK)
+      on('classic.PermissionRequest', async (_, e) => {
+        const stood = (e.tool_input as { command: string }).command.startsWith('ls ') ? 14_381 : 9_707
+        await clock.advance(STANDS_MS - 1)
+        seen.push((await shown(outer)).caption)
+        await clock.advance(1)
+        seen.push((await shown(outer)).caption)
+        await clock.advance(stood - STANDS_MS)
+        return ALLOWED
+      })
+      on('tool.run', () => BASH_OK)
+      await start($)
+      await $.turn.start({ text: '', turnId: 't1' })
+      await $.tool.call({ tool: 'Bash', command: 'ls /nicht-vorhanden-noxdeck', tool_use_id: 'tu-ls' })
+      expect((await shown($)).wait).toBe('Wartezeit 0:14 · 1 Freigabe')
+      await $.tool.call({ tool: 'Bash', command: 'touch freigabe-test.txt', tool_use_id: 'tu-touch' })
+      // 14.381 s and 9.707 s, the first second of each in it: 24.088 s.
+      expect((await shown($)).wait).toBe('Wartezeit 0:24 · 2 Freigaben')
+      expect(seen).toEqual(['arbeitet …', 'braucht deine Freigabe', 'arbeitet …', 'braucht deine Freigabe'])
+    })
+
+    test('a tool.judge that comes after 3 s: the call is the classifier\'s, no approval and no cue from then on, however long it takes', async ($, on) => {
+      const clock = engine(on)
+      const outer = $
+      const seen: unknown[] = []
+      // Invented: auto mode asking its classifier about a call 3 s after its check said `ask`, and the
+      // classifier taking a minute. No tool.judge has been recorded; its input is the types'.
+      on('tool.check', () => ASK)
+      on('tool.judge', () => ({ decision: 'allow' as const }))
+      on('classic.PermissionRequest', async () => {
+        await clock.advance(3000)
+        await outer.tool.judge({ tool: 'Bash', input: { command: 'make' }, tool_use_id: 'tu-make' } as never)
+        seen.push(await shown(outer))
+        await clock.advance(60_000)
+        seen.push(await shown(outer))
+        return ALLOWED
+      })
+      on('tool.run', () => BASH_OK)
+      await start($)
+      await $.turn.start({ text: '', turnId: 't1' })
+      await $.tool.call({ tool: 'Bash', command: 'make', tool_use_id: 'tu-make' })
+      expect(seen).toEqual([{ caption: 'arbeitet …', wait: undefined }, { caption: 'arbeitet …', wait: undefined }])
+      expect((await shown($)).wait).toBeUndefined()
+    })
+
+    test('an ask a settings hook refuses at once is over with its call: no cue a second later, nothing counted', async ($, on) => {
+      const clock = engine(on)
+      on('tool.check', () => ASK)
+      on('classic.PermissionRequest', () => ({ decision: { behavior: 'deny' } }) as never)
+      await start($)
+      await $.turn.start({ text: '', turnId: 't1' })
+      expect((await $.tool.call({ tool: 'Bash', command: 'make', tool_use_id: 'tu-make' })).isError).toBe(true)
+      await clock.advance(STANDS_MS + 500)
+      const after = await shown($)
+      expect(after.caption).not.toBe('braucht deine Freigabe')
+      expect(after.wait).toBeUndefined()
+    })
+
+    test('an ask given up after 2 s: the cue goes with the call, as for a refusal; one approval, its wait the 2 s, no failure', async ($, on) => {
+      const clock = engine(on)
+      const outer = $
+      let during: unknown
+      // Invented: the person interrupting 2 s into a dialog. The call comes back errored, its tool never run.
+      on('tool.check', () => ASK)
+      on('classic.PermissionRequest', async () => {
+        await clock.advance(2000)
+        during = (await shown(outer)).caption
+        return {}
+      })
+      await start($)
+      await $.turn.start({ text: '', turnId: 't1' })
+      expect((await $.tool.call({ tool: 'Bash', command: 'make', tool_use_id: 'tu-make' })).isError).toBe(true)
+      expect(during).toBe('braucht deine Freigabe')
+      // The cue is gone (the caption names the errored call, as after any refusal); RADAR counts no failure.
+      const after = await shown($)
+      expect(after.caption).not.toBe('braucht deine Freigabe')
+      expect(after.wait).toBe('Wartezeit 0:02 · 1 Freigabe')
+      expect(has(await textsAt($), /^Fehler \d/)).toBe(false)
+    })
   })
 
   test('RADAR in English', { options: { language: 'en' } }, async ($, on) => {
@@ -387,11 +509,12 @@ describe('RADAR', () => {
   })
 
   test('Nox\'s caption and every STATUS and RADAR row stay one row in a narrow dock: cut, never wrapped', async ($, on) => {
-    engine(on)
+    const clock = engine(on)
     const outer = $
     let narrow: Found[] = []
     on('tool.check', (_, e) => ({ decision: (e.input as { command?: string }).command === 'rm -rf build' ? 'ask' : 'allow' }))
     on('classic.PermissionRequest', async () => {
+      await clock.advance(STANDS_MS)
       narrow = await textsAt(outer, 80, 24)
       return ALLOWED
     })

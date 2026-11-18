@@ -2,7 +2,7 @@ import { describe, expect } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { AgentInfo, On, SessionRateLimit } from 'claude-code'
 import { cellsOf } from '../hooks/view'
-import { ASK, BAR, engine, FAILED, K, PANE, READ_RESULT, SPAWN, start, SURFACES, test, TODOS } from './helpers'
+import { ASK, BAR, engine, FAILED, K, STANDS_MS, PANE, READ_RESULT, SPAWN, start, SURFACES, test, TODOS } from './helpers'
 import type { World } from './helpers'
 
 // The pane seated inline above the prompt. What the engine takes around the
@@ -504,13 +504,15 @@ describe('what does not fit is cut visibly', () => {
       return texts.some(found => found.props.color === 'claude' && /Freigabe/.test(String((found as unknown as { text: string }).text)))
     }
     let seen: boolean[] = []
-    // The check puts the call to the person; while the dialog stands, both views say so.
+    const clocks: { advance: (ms: number) => Promise<void> }[] = []
+    // The check puts the call to the person; once the dialog has stood a second, both views say so.
     on('tool.check', () => ASK)
     on('classic.PermissionRequest', async () => {
+      await clocks[0]?.advance(STANDS_MS)
       seen = [await accent(60), await accent(100)]
       return {}
     })
-    await session($, on)
+    clocks.push(await session($, on))
     await $.tool.call({ tool: 'Bash', command: 'x', tool_use_id: 'tu-1' })
     expect(seen).toEqual([true, true])
   })

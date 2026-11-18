@@ -529,8 +529,9 @@ let calls = 0
 
 // What a call meets on its way, kept by its tool_use_id until its tool.call
 // ends. Its permission check's verdict (tool.check): an `ask` is put to the
-// mode's decider, a person's dialog unless auto mode's classifier is asked
-// about the call (tool.judge). The call allowed and about
+// mode's decider, a person's dialog once it has stood a second
+// (ASK_STANDS_MS), and never where auto mode's classifier is asked about
+// the call (tool.judge). The call allowed and about
 // to run (tool.run): a dialog raised for it ends there. A call that reached
 // the check and came back errored without having run was refused there (by
 // a rule, the mode, a hook, the person, the classifier); one that ran and
@@ -542,8 +543,22 @@ let calls = 0
 const openCalls = new Set<string>()
 /** Calls that reached the permission check. */
 const checkedCalls = new Set<string>()
-/** Calls with a dialog taken to stand: the check said `ask`, and no classifier was asked. */
+/**
+ * How long an `ask` stands before it is taken for a person's dialog. Auto
+ * mode settles an ask too, and for a call it settles with no classifier it
+ * raises no tool.judge: recorded on 18 November 2026 (Claude Code 2.1.327),
+ * `tool.check` said `ask` and `tool.run` came 0.48 s later, nothing between.
+ * An ask that has stood this long with no tool.judge, no tool.run and its
+ * call not over is a dialog; one settled sooner opens no cue and counts as
+ * no approval.
+ */
+const ASK_STANDS_MS = 1000
+/** Asks still short of that, by call: the dialog each would be, and when its check said `ask`. */
+const pendingAsks = new Map<string, { asked: Ask; at: number }>()
+/** Calls with a dialog taken to stand: their ask stood ASK_STANDS_MS, its cue is open. */
 const askedCalls = new Set<string>()
+/** Cues being opened, by call: what ends one waits until its opening is written. */
+const openingAsks = new Map<string, Promise<void>>()
 /** Calls auto mode's classifier was asked about: their ask is no person's. */
 const judgedCalls = new Set<string>()
 /** Calls that were allowed and began to run. */
@@ -865,44 +880,79 @@ function noteSpawn($: EngineInterface, spawned: Frozen<Args<'agent.spawn'>>): Pr
 }
 
 /**
- * A call's permission check has its verdict. An `ask` opens the dialog's
- * cue: the mascot asks from here until the call is allowed (tool.run) or
- * ends. Not where auto mode's classifier was already asked about the call,
- * or for a call no longer in flight.
+ * A call's permission check has its verdict. An `ask` waits ASK_STANDS_MS:
+ * still standing then (no tool.judge, no tool.run, the call not over), it
+ * is a person's dialog, and its cue opens (openAsk). Not where auto mode's
+ * classifier was already asked about the call, or for a call no longer in
+ * flight.
  */
 function noteVerdict($: EngineInterface, check: Frozen<Args<'tool.check'>>, decision: string): Promise<void> {
   const id = check.tool_use_id
   // A query (`$.tool.check`) decides about no call.
   if (id === undefined) return Promise.resolve()
   checkedCalls.add(id)
-  if (decision !== 'ask' || !openCalls.has(id) || judgedCalls.has(id) || ranCalls.has(id)) return Promise.resolve()
-  const asked: Ask = { id, tool: check.tool, agentId: check.agentId ?? null }
-  askedCalls.add(id)
-  if (asked.agentId !== null) agentsAsking.add(asked.agentId)
+  const isSettled = () => !openCalls.has(id) || judgedCalls.has(id) || ranCalls.has(id)
+  if (decision !== 'ask' || isSettled() || pendingAsks.has(id) || askedCalls.has(id)) return Promise.resolve()
+  const asked = { id, tool: check.tool, agentId: check.agentId ?? null }
   return quietly(async () => {
-    const at = await $.clock.now()
-    await update($, cues, state => {
-      if (state.asking.some(ask => ask.id === id)) return state
-      const opened = withAsking(state, [...state.asking, asked].slice(-20), at)
-      return isApproval(asked) ? { ...opened, approvals: opened.approvals + 1 } : opened
+    const pending = { asked, at: await $.clock.now() }
+    if (isSettled()) return
+    pendingAsks.set(id, pending)
+    $.clock.after(ASK_STANDS_MS, () => {
+      if (pendingAsks.get(id) !== pending) return
+      pendingAsks.delete(id)
+      openAsk($, asked, pending.at)
     })
-    ensureTicker($)
   })
 }
 
-/** Auto mode's classifier is asked about a call: its ask is no person's, so the cue it opened is taken back, uncounted. */
+/**
+ * The cue of a dialog that has stood: the mascot asks until the call is
+ * allowed (tool.run) or ends, and an approval is counted. The wait runs
+ * from `since`, when the check said `ask`, so the second the ask stood
+ * before it was taken for a dialog is in it.
+ */
+function openAsk($: EngineInterface, asked: Ask & { id: string }, since: number): void {
+  const id = asked.id
+  askedCalls.add(id)
+  if (asked.agentId !== null) agentsAsking.add(asked.agentId)
+  const opening = quietly(async () => {
+    await update($, cues, state => {
+      if (state.asking.some(ask => ask.id === id)) return state
+      const opened = withAsking(state, [...state.asking, asked].slice(-20), since)
+      return isApproval(asked) ? { ...opened, approvals: opened.approvals + 1 } : opened
+    })
+    ensureTicker($)
+  }).finally(() => {
+    if (openingAsks.get(id) === opening) openingAsks.delete(id)
+  })
+  openingAsks.set(id, opening)
+}
+
+/**
+ * Auto mode's classifier is asked about a call: its ask is no person's,
+ * however long it stands. One still waiting opens no cue; a cue already
+ * open is taken back, the approval and the wait with it.
+ */
 function noteJudged($: EngineInterface, judged: Frozen<Args<'tool.judge'>>): Promise<void> {
   const id = judged.tool_use_id
   judgedCalls.add(id)
+  pendingAsks.delete(id)
   if (!askedCalls.delete(id)) return Promise.resolve()
-  return quietly(() => update($, cues, state => withAskWithdrawn(state, id)))
+  return quietly(async () => {
+    await openingAsks.get(id)
+    await update($, cues, state => withAskWithdrawn(state, id))
+  })
 }
 
 /** A call was allowed and is about to run: a dialog raised for it ends now, the wait for it with it. */
 function noteAllowed($: EngineInterface, id: string): Promise<void> {
   ranCalls.add(id)
+  // An ask settled before it had stood was no dialog: nothing opened, nothing counted.
+  pendingAsks.delete(id)
   if (!askedCalls.delete(id)) return Promise.resolve()
   return quietly(async () => {
+    await openingAsks.get(id)
     const at = await $.clock.now()
     await update($, cues, state => {
       const asked = state.asking.findIndex(ask => ask.id === id)
@@ -1022,9 +1072,11 @@ export const register: Register = (on, options) => {
       reply = await next(e)
     } finally {
       openCalls.delete(call.id)
+      pendingAsks.delete(call.id)
       wasInterrupted = interruptedCalls.delete(call.id)
       const hasRun = ranCalls.has(call.id)
       await quietly(async () => {
+        await openingAsks.get(call.id)
         // The call is over, and with it a permission dialog still open for it.
         if (!isMain && !(e.agentId !== undefined && agentsAsking.has(e.agentId))) return
         const at = await $.clock.now()
@@ -1295,6 +1347,7 @@ export const register: Register = (on, options) => {
           answeredAt: e.reason === 'answer' ? at : null,
         }))
         // The turn's calls and questions are over; the rest starts, and a failed turn startles.
+        for (const [id, pending] of pendingAsks) if (pending.asked.agentId === null) pendingAsks.delete(id)
         await update($, cues, state =>
           withAsking(
             { ...state, running: [], restingSince: at, startledAt: hasFailed ? at : state.startledAt },
@@ -1332,6 +1385,7 @@ export const register: Register = (on, options) => {
       await update($, agentLedger, ledger => withWork(ledger, id, work => ({ ...work, endedAt: at })))
       // Its turn's dialogs are over; an agent at work keeps the rest from starting.
       agentsAsking.delete(id)
+      for (const [call, pending] of pendingAsks) if (pending.asked.agentId === id) pendingAsks.delete(call)
       await update($, cues, state =>
         withAsking(
           { ...state, restingSince: Math.max(state.restingSince, at) },
@@ -1378,6 +1432,8 @@ export const register: Register = (on, options) => {
         boardKey = ''
         openCalls.clear()
         checkedCalls.clear()
+        pendingAsks.clear()
+        openingAsks.clear()
         askedCalls.clear()
         judgedCalls.clear()
         interruptedCalls.clear()

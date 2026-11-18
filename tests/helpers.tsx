@@ -415,6 +415,8 @@ export const BASH_OK = { result: { stdout: '', stderr: '', interrupted: false } 
 // mode settled the one command it was given (`touch` in the working
 // folder) with no classifier, and so with no tool.judge.
 
+/** How long an `ask` stands before noxdeck takes it for a person's dialog (ASK_STANDS_MS in hooks/register.tsx). */
+export const STANDS_MS = 1000
 /** The dialog's answer once the person, or a settings hook, allows the call. */
 export const ALLOWED = { decision: { behavior: 'allow' } } as const
 /** The verdict that puts a call to the person. */

@@ -56,6 +56,7 @@ import {
   FAILED,
   ALLOWED,
   ASK,
+  STANDS_MS,
   textsAt,
   has,
 } from './helpers'
@@ -175,6 +176,8 @@ describe('mascot Nox on events', () => {
     // The check puts the call to the person; the dialog stands until they allow it.
     on('tool.check', () => ASK)
     on('classic.PermissionRequest', async () => {
+      // The ask has to stand a second before it is taken for a dialog.
+      await clock.advance(STANDS_MS)
       asking = await posesOver(outer, clock, 1500)
       const ui = await outer.ui.mount({ ...PANE, surface: 'terminal' })
       caption = (await captionOf(ui))?.text
@@ -274,6 +277,7 @@ describe('mascot Nox on events', () => {
     await start($)
     await $.turn.start({ text: '', turnId: 'x', agentId: 'a1' })
     const call = $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'a1', tool_use_id: 'tu-a' })
+    await clock.advance(STANDS_MS)
     expect(framesIn(await posesOver($, clock, 500))).toContain('question')
     await $.turn.complete({ turnId: 'x', agentId: 'a1', answer: '', durationMs: 1, isAborted: false, reason: 'answer' })
     expect(framesIn(await posesOver($, clock, 1000))).not.toContain('question')
@@ -298,6 +302,7 @@ describe('mascot Nox on events', () => {
     await $.turn.start({ text: '', turnId: 't1' })
     const asked = $.tool.call({ tool: 'Read', file_path: '/proj/a.ts', tool_use_id: 'tu-a' })
     await $.tool.call({ tool: 'Read', file_path: '/proj/b.ts', tool_use_id: 'tu-b' })
+    await clock.advance(STANDS_MS)
     expect([...(await posesOver($, clock, 1000))].sort()).toEqual(['question', 'questionLow'])
     release()
     await asked
@@ -355,6 +360,7 @@ describe('mascot Nox on events', () => {
     let asking = new Set<string>()
     on('tool.check', () => ASK)
     on('classic.PermissionRequest', async () => {
+      await clock.advance(STANDS_MS)
       asking = await posesOver(outer, clock, 500)
       return ALLOWED
     })
@@ -409,7 +415,7 @@ describe('mascot Nox on events', () => {
     await clock.advance(0)
     finishA()
     await a
-    expect(framesIn(await posesOver($, clock, 1000))).toContain('question')
+    expect(framesIn(await posesOver($, clock, 2000))).toContain('question')
     answerB()
     await b
     expect(framesIn(await posesOver($, clock, 1000))).not.toContain('startled')
@@ -870,6 +876,7 @@ describe('Mini-Nox: the small owl where the pane is short', () => {
     const titles: unknown[] = []
     on('tool.check', () => ASK)
     on('classic.PermissionRequest', async () => {
+      await clock.advance(STANDS_MS)
       asking = await posesOver(outer, clock, 12_000, SHORT)
       titles.push(await titleAt(outer, { rows: 26, columns: 45 }), await titleAt(outer, { rows: 26, columns: 40 }))
       return ALLOWED
